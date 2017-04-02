@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# PROVIDE: dsbmd
+# REQUIRE: LOGIN devfs devd mountlate
+# KEYWORD: shutdown
+#
+# Add these lines to /etc/rc.conf.local or /etc/rc.conf
+# to enable this service:
+#
+# dsbmd_enable (bool):		Set to NO by default.
+#				Set it to YES to enable dsbmd.
+#
+
+. /etc/rc.subr
+
+name=dsbmd
+command=@PATH_PROGRAM@
+rcvar=dsbmd_enable
+pidfile=@PATH_PIDFILE@
+
+load_rc_config $name
+
+: ${dsbmd_enable:="NO"}
+
+run_rc_command "$1"

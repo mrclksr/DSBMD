@@ -1,0 +1,202 @@
+				ABOUT DSBMD
+
+	DSBMD is a media/filesystem type detecting daemon that allows clients
+to mount storage devices.
+
+	DSBMD watches the mount table for changes, monitors devd events for new
+storage devices, polls CD/DVD drives and card readers for media change events,
+determines media types, volume names, and filesystem types. Mountable devices,
+changes in the mount table as well as device add/remove events and altered
+states of mountable devices are presented to clients. Clients can request DSBMD
+to mount, unmount, and eject media, or set the CD/DVD reading speed.
+
+Some features are:
+
+- Client authentication is handled using UNIX domain-socket credentials.
+  Authorization can be defined on a user and/or group basis.
+
+- For each supported filesystem, mount flags or external mount commands can be
+  defined.
+
+- Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2fs, exFAT, ReiserFS,
+  and XFS.
+
+- Mounts and unmounts not initiated though DSBMD are detected, and necessary
+  action are taken.
+
+- Simple plain text protocol. DSBMD can be used and debugged using Telnet
+  (telnet -u /var/run/dsbmd.socket) or Netcat (nc -U /var/run/dsbmd.socket).
+
+- Easy configuration through /usr/local/etc/dsbmd.conf
+
+- Support for FUSE
+
+- Support for Linux LVM logical volumes through geom_linux_lvm(4)
+
+
+FILES USED
+
+ UNIX domain socket:	/var/run/dsbmd.socket
+ Configuration file:	/usr/local/etc/dsbmd.conf
+ Logfile:		/var/log/dsbmd.log
+
+
+
+			DSBMD PROTOCOL SPECIFICATION
+
+1.0 CLIENT SIDE
+
+ 1.1 CONNECTION
+
+    When a client WITHOUT permission connects, DSBMD sends an error message with
+ code ERR_PERMISSION_DENIED (258), and terminates the connection.
+
+    When a client WITH permission connects, DSBMD sends a list of zero or more
+ drives using device add messages (2.5.1). The list is terminated by sending
+ a ``=´´ on a line by itself.
+
+ 1.2 COMMANDS
+
+ General command format:
+ command [option [arg]] [option [arg]] ... <newline>
+
+    DSBMD sends a reply message for any sent known or unknown command. Between
+ the transmission of the command and the reception of the command reply
+ message, multiple information and/or device add/remove messages (2.1) can
+ occur.
+
+    DSBMD processes each client's commands synchronously, that is, the commands
+ will be processed in the same order as they where received. After a command's
+ reply message was sent, the next command will be processed.
+
+ DSBMD supports the following commands:
+	mount <device name>
+
+	unmount [-f] <device name>
+ If the -f switch is specified, unmounting will be enforced.
+
+ 	eject [-f] <device name>
+ This command unmounts and ejects the inserted media. If the -f switch is
+ specified, unmounting and ejecting of the media will be enforced.
+
+	speed <device name> <speed>
+ Sets the maximum reading speed of the CD/DVD device.
+
+	size <device name>
+ This command asks DSBMD for the capacity of a disk. DSBMD will return the to-
+ tal size in bytes, and if the device is mounted, it will also return the num-
+ ber of used and free bytes.
+
+2.0 DAEMON SIDE
+
+ 2.1 GENERAL DSBMD MESSAGE FORMAT
+
+ <message type>:<keyword>=<value>:...:<keyword>=<value><newline>
+
+ 2.2 DSBMD MESSAGE TYPES
+
+ MESSAGE TYPE	MEANING
+ ------------------------------------------------------------------------------
+ +		A drive was added
+ -		A drive was removed
+ I		Information. The type information is defined by 'msgtype'
+ W		A warning message.
+ E		An error message.
+ O		Command execution was successful.
+
+ 2.3 KEYWORDS AND VALUES
+
+ KEYWORD		VALUE
+ ------------------------------------------------------------------------------
+ msgtype	mount, unmount, speed, eject, shutdown
+ command	mount, unmount, speed, eject, size
+ code		An errno number (< 257) or a special error code (>= 257)
+ dev		Device name
+ mntpt		Mount point
+ speed		Max. CD/DVD reading speed.
+ mediasize	Total capacity in bytes of a media
+ used		Number of used bytes of a media
+ free		Number of free bytes of a media
+ type		Drive/media type: HDD, AUDIOCD, DVD, VCD, USBHDD, SVCD, DATACD
+ cmds		A comma (``,´´) separated list of supported drive commands.
+ mntcmderr	Numerical return value of external mount command.
+
+ 2.4 ERROR CODES
+
+ CODE		MEANING
+ ------------------------------------------------------------------------------
+ 257		Device already mounted
+ 258		Permission denied
+ 259		Device not mounted
+ 260		Device busy
+ 261		No such device
+ 262		Max. number of connections reached
+ 263		Not ejectable
+ 264		Unknown command
+ 265		Unknown option
+ 266		Syntax error
+ 267		No media
+ 268		Unknown filesystem
+ 269		Unknown error
+ 270		Mount command failed
+ 271		Invalid Argument
+
+
+ 2.5.0 DSBMD MESSAGES IN DETAIL
+
+ 2.5.1 DEVICE ADD MESSAGE (+)
+
+ +:dev=<devname>:type=<devtype>:cmds=<command list>
+	[:volid=<volid>][:mntpt=<mounted on>][:speed=<speed>]
+
+ 2.5.2 DEVICE REMOVE MESSAGE (-)
+
+ -:dev=<devname>
+
+ 2.5.3 ERROR MESSAGE FORMAT (E)
+
+ E:code=<error code>[:command=<executed command>]
+
+ 2.5.4 INFO MESSAGE FORMAT (I)
+
+ General format:
+ I:msgtype=<message type>:[dev=<devname>:speed=<speed>|mntpt=<mounted on>]
+
+ If the speed of a CDROM device was changed, the following message will be
+ sent to all connected clients:
+	I:msgtype=speed:dev=<devname>:speed=<speed>
+
+ If a device was mounted, the following message will be sent to all connected
+ clients:
+	I:msgtype=mount:dev=<devname>:mntpt=<mounted on>
+
+ If a device was unmounted, the following message will be sent to all connected
+ clients:
+	I:msgtype=unmount:dev=<devname>:mntpt=<mounted on>
+
+ If the daemon was terminated, it sends the following message to all connected
+ clients:
+	I:msgtype=shutdown
+
+ 2.5.5 SUCCESS MESSAGE FORMAT (O)
+
+ General format:
+ O:command=<executed command>[:keyword=value] ...
+
+ If a device was successfully mounted, DSBMD replies with the following message:
+	O:command=mount:dev=<devname>:mntpt=<mounted on>
+
+ If a device was successfully unmounted, DSBMD replies with the following
+ message:
+	O:command=unmount:dev=<devname>:mntpt=<mounted on>
+
+ If the capacity of a disk device was requested, DSBMD sends the following
+ message:
+	O:command=size:dev=<devname>:mediasize=<size in bytes>:used=<used bytes>:free=<free bytes>
+
+'used' and 'free' are 0 if the disk device is not mounted.
+
+ For all other successfully executed commands, DSBMD sends the following
+ message:
+	O:command=<executed command>
+
