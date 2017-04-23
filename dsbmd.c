@@ -84,9 +84,9 @@ static int		extend_iovec(struct iovec **, int *, const char *,
 			    const char *);
 static int		eject_media(client_t *, drive_t *, bool);
 static int		set_cdrspeed(client_t *, drive_t *, int);
+static bool		match_part_dev(const char *, size_t);
 static bool		has_media(const char *);
-static bool		has_partitions(const char *);
-static bool		is_partition(const char *);
+static bool		is_parted(const char *);
 static bool		is_atapicam(const char *);
 static bool		is_mountable(const char *);
 static bool		is_mntpt(const char *);
@@ -833,92 +833,70 @@ update_drive(drive_t *drvp)
 }
 
 /*
- * Check if the given device name matches the pattern
- * <prefix><number>[s<number>][a-h|p<number>]. If the latter
- * is true, check if it's a symlink instead of a real device.
+ * Check if the given device name matches the name of a (sliced) partitioned
+ * disk. If len == 0, return 'true' only if there is an exact match. If len
+ * is > 0, return 'true' if 'dev' matches at least 'len' chars.
  */
 
 static bool
-is_partition(const char *dev)
+match_part_dev(const char *dev, size_t len)
 {
-	char	    path[sizeof(_PATH_DEV) + 256 + 2];
-	const char  parts[] = "abcdefgh", *p;
-	struct stat sb;
+	size_t slen, maxlen;
+	struct gmesh     mesh;
+	struct ggeom     *gp;
+	struct gclass    *cp;
+	struct gprovider *pp;
 
-	p = dev = devbasename(dev);
-	(void)snprintf(path, sizeof(path) - 1, "%s%s", _PATH_DEV, dev);
+	maxlen = 0;
 
-	while (*p != '\0' && !isdigit(*p))
-		p++;
-	if (*p++ == '\0')
+	if (geom_gettree(&mesh) != 0)
 		return (false);
-	while (isdigit(*p++))
-		;
-	if (*p == '\0')
-		return (false);
-	if (*p == 's') {
-		while (*++p != '\0' && isdigit(*p))
-			;
+	LIST_FOREACH(cp, &mesh.lg_class, lg_class) {
+		if (strcmp(cp->lg_name, "PART") != 0)
+			continue;
+		LIST_FOREACH(gp, &cp->lg_geom, lg_geom) {
+			if (LIST_EMPTY(&gp->lg_provider))
+				continue;
+			LIST_FOREACH(pp, &gp->lg_provider, lg_provider) {
+				if (len == 0)
+					slen = strlen(dev);
+				else
+					slen = len;
+				if (strncmp(pp->lg_name, dev, slen) == 0) {
+					if (len > 0) {
+						/* Just match substring. */
+						geom_deletetree(&mesh);
+						return (true);
+					}
+					if (maxlen < strlen(pp->lg_name))
+						maxlen = strlen(pp->lg_name);
+				}
+                	}
+		}
 	}
-	if (strchr(parts, *p) != NULL ||
-	    ((*p == 'p' && isdigit(p[1])))) {
-		/* Check if it's just a symlink */
-		if (lstat(path, &sb) == -1)
-			err(EXIT_FAILURE, "lstat(%s)", path);
-		if (S_ISLNK(sb.st_mode))
-			return (false);
+	geom_deletetree(&mesh);
+	if (len == 0 && maxlen > 0 && maxlen == strlen(dev))
 		return (true);
-	}
 	return (false);
 }
 
+
 /*
- * Check if the given device name is a partition or has
- * partitions.
+ * Take the disk part (e.g. adX) of a device name, and check if it has
+ * slices or partitions.
  */
 static bool
-has_partitions(const char *dev)
+is_parted(const char *dev)
 {
-	DIR	      *dirp;
-	char	      path[sizeof(_PATH_DEV) + 256 + 2];
-	const char    parts[] = "abcdefgh", *p;
-	struct stat   sb;
-	struct dirent *dp;
+	size_t len = 0;
+	
+	dev = devbasename(dev);
 
-	p = dev = devbasename(dev);
-	(void)snprintf(path, sizeof(path) - 1, "%s%s", _PATH_DEV, dev);
-
-	while (*p != '\0' && !isdigit(*p))
-		p++;
-	if (*p++ == '\0')
-		return (false);
-	if (chdir(_PATH_DEV) == -1)
-		err(EXIT_FAILURE, "chdir(%s)", _PATH_DEV);
-	if ((dirp = opendir(".")) == NULL)
-		err(EXIT_FAILURE, "opendir(%s)", _PATH_DEV);
-	while ((dp = readdir(dirp)) != NULL) {
-		if (strncmp(dev, dp->d_name, strlen(dev)) != 0)
-			continue;
-		if (strlen(dp->d_name) <= strlen(dev))
-			continue;
-		p = dp->d_name + strlen(dp->d_name) - 2;
-		if ((!isdigit(p[1]) || p[0] != 'p') &&
-		    (strchr(parts, p[1]) == NULL))
-			continue;
-		/* Check if it's a symlink. */
-		if (lstat(dp->d_name, &sb) == -1)
-			err(EXIT_FAILURE, "lstat(%s)", dev);
-		if (S_ISLNK(sb.st_mode))
-			/* Ignore symlinks. */
-			continue;
-		(void)closedir(dirp);
-		(void)chdir("/");
-		return (true);
-	}
-	(void)closedir(dirp);
-	(void)chdir("/");
-
-	return (false);
+	while (dev[len] != '\0' && !isdigit(dev[len]))
+		len++;
+	while (isdigit(dev[len]))
+		len++;
+	return (match_part_dev(dev, len));
 }
 
 /*
@@ -990,8 +968,8 @@ is_mountable(const char *dev)
 	(void)snprintf(path, sizeof(path), "%s%s", _PATH_DEV, dev);
 	if ((type = getfs(path)) != NULL) {
 		if (type->id == UFS) {
-			if (has_partitions(dev)) {
-				if (is_partition(dev))
+			if (is_parted(dev)) {
+				if (match_part_dev(dev, 0))
 					return (true);
 				return (false);
 			}
