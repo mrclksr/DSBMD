@@ -470,7 +470,7 @@ cd9660_get_volid(const char *path)
 	ip = (struct iso_primary_descriptor *)sector;
 	if (memcmp(ISO_STANDARD_ID, ip->id, strlen(ISO_STANDARD_ID)) == 0 ||
 	    memcmp(ISO_SIERRA_ID, ip->id, strlen(ISO_SIERRA_ID)) == 0     ||
-	    memcmp(ISO_ECMA_ID, ip->id, strlen(ISO_ECMA_ID) == 0)) {
+	    memcmp(ISO_ECMA_ID, ip->id, strlen(ISO_ECMA_ID)) == 0) {
 		p = strncpy(volid, ip->volume_id, sizeof(volid) - 1);
 		for (q = p + strlen(volid) - 1; q > p && *q == ' '; q--)
 			*q = '\0';
