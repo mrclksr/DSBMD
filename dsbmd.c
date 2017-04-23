@@ -912,10 +912,12 @@ has_partitions(const char *dev)
 			/* Ignore symlinks. */
 			continue;
 		(void)closedir(dirp);
+		(void)chdir("/");
 		return (true);
 	}
 	(void)closedir(dirp);
-	
+	(void)chdir("/");
+
 	return (false);
 }
 
@@ -982,8 +984,8 @@ is_mountable(const char *dev)
 			return (false);
 	}
 	/*
-	 * In case of UFS, only accept partitioned slices/disks.
-	 * Accept ada0a, ada0s1a, etc., but not ada0, ada0s1, etc. 
+	 * In case of UFS: If a disk/slice has partitions, only accept
+	 * partitions. 
 	 */
 	(void)snprintf(path, sizeof(path), "%s%s", _PATH_DEV, dev);
 	if ((type = getfs(path)) != NULL) {
@@ -993,7 +995,6 @@ is_mountable(const char *dev)
 					return (true);
 				return (false);
 			}
-			return (true);
 		}
 	} 
 	return (true);
