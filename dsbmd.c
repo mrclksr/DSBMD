@@ -1030,8 +1030,7 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 		}
 	}
 	if ((cs = strchr(locale, '.')) == NULL) {
-		warnx("Invalid locale string '%s'",
-		    dsbcfg_getval(cfg, CFG_MSDOSFS_LOCALE).string);
+		warnx("Invalid locale string '%s'", locale);
 		return (-1);
 	}
 	locale = kiconv_quirkcs(cs + 1, KICONV_VENDOR_MICSFT);
