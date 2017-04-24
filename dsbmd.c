@@ -45,6 +45,10 @@
 #include <sys/cdrio.h>
 #include <sys/disk.h>
 #include <sys/disklabel.h>
+#include <sys/iconv.h>
+#include <sys/param.h>
+#include <sys/linker.h>
+#include <sys/module.h>
 #include <unistd.h>
 #include <vm/vm_param.h>
 #include <dirent.h>
@@ -68,6 +72,7 @@
 #include "dsbmd.h"
 #include "dsbcfg/dsbcfg.h"
 #include "config.h"
+#include <sys/iconv.h>
 
 #define MAXDEVS		64
 #define NCOMMANDS	(sizeof(commands) / sizeof(struct command_s))
@@ -84,6 +89,7 @@ static int		extend_iovec(struct iovec **, int *, const char *,
 			    const char *);
 static int		eject_media(client_t *, drive_t *, bool);
 static int		set_cdrspeed(client_t *, drive_t *, int);
+static int		set_msdosfs_locale(const char *, struct iovec**, int *);
 static bool		match_part_dev(const char *, size_t);
 static bool		has_media(const char *);
 static bool		is_parted(const char *);
@@ -1009,6 +1015,38 @@ free_iovec(struct iovec *iov)
 }
 
 static int
+set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
+{
+	const char *cs;
+
+	if (modfind("msdosfs_iconv") == -1) {
+		if (errno != ENOENT) {
+			warn("modfind(msdosfs_iconv) failed.");
+			return (-1);
+		}
+		if (kldload("msdosfs_iconv") == -1 && errno != EEXIST) {
+			warn("kldload(msdosfs_iconv)");
+			return (-1);
+		}
+	}
+	if ((cs = strchr(locale, '.')) == NULL) {
+		warnx("Invalid locale string '%s'",
+		    dsbcfg_getval(cfg, CFG_MSDOSFS_LOCALE).string);
+		return (-1);
+	}
+	locale = kiconv_quirkcs(cs + 1, KICONV_VENDOR_MICSFT);
+	if (extend_iovec(iov, iovlen, "cs_win", ENCODING_UNICODE) == -1 ||
+	    extend_iovec(iov, iovlen, "cs_local", locale) == -1		||
+	    extend_iovec(iov, iovlen, "cs_dos", locale) == -1		||
+	    extend_iovec(iov, iovlen, "kiconv", "") == -1)
+		err(EXIT_FAILURE, "extend_iovec()");
+	(void)kiconv_add_xlat16_cspair(locale, locale,
+	    KICONV_FROM_UPPER | KICONV_LOWER);
+
+	return (0);
+}
+
+static int
 mymount(const char *fs, const char *dir, const char *dev, const char *opts)
 {
 	int	     iovlen, ret;
@@ -1032,6 +1070,13 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts)
 				err(EXIT_FAILURE, "extend_iovec()");
 		}
 		free(op);
+	}
+	if (strcmp(fs, "msdosfs") == 0 &&
+	    dsbcfg_getval(cfg, CFG_MSDOSFS_LOCALE).string != NULL) {
+		if (set_msdosfs_locale(
+		    dsbcfg_getval(cfg, CFG_MSDOSFS_LOCALE).string,
+		    &iov, &iovlen) == -1)
+			warnx("set_msdosfs_locale() failed.");
 	}
 	errno = 0;
 	ret = nmount(iov, iovlen, 0);
