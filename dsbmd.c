@@ -906,8 +906,7 @@ is_parted(const char *dev)
 static bool
 is_mountable(const char *dev)
 {
-	char	      *p, *label, path[sizeof(_PATH_DEV) + 256];
-	fs_t	      *type;
+	char	      *p, *label;
 	bool	      found;
 	size_t	      nmib, len;
 	const char    *q;
@@ -917,6 +916,10 @@ is_mountable(const char *dev)
 	struct xswdev xsw;
 
 	dev = devbasename(dev);
+
+	/* Only accept partitions/slices if the device has them. */
+	if (is_parted(dev) && !match_part_dev(dev, 0))
+		return (false);
 	while ((fs = getfsent()) != NULL) {
 		q = devbasename(fs->fs_spec);
 		for (i = 0, found = false; i < NGLBLPRFX && !found; i++) {
@@ -961,20 +964,6 @@ is_mountable(const char *dev)
 		if (strcmp(dev, swap[i]) == 0)
 			return (false);
 	}
-	/*
-	 * In case of UFS: If a disk/slice has partitions, only accept
-	 * partitions. 
-	 */
-	(void)snprintf(path, sizeof(path), "%s%s", _PATH_DEV, dev);
-	if ((type = getfs(path)) != NULL) {
-		if (type->id == UFS) {
-			if (is_parted(dev)) {
-				if (match_part_dev(dev, 0))
-					return (true);
-				return (false);
-			}
-		}
-	} 
 	return (true);
 }
 
