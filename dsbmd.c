@@ -1421,14 +1421,29 @@ getmntpt(drive_t *drvp)
 static void
 rmntpt(const char *path)
 {
-	const char *mntprfx, *p;
+	const char *mntprfx, *p, *_path;
 
+	_path = path;
 	mntprfx = dsbcfg_getval(cfg, CFG_MNTDIR).string;
-	for (p = strchr(mntprfx, '\0') - 1; *p == '/'; p--)
+
+	/* Skip leading '/' */
+	while (mntprfx[1] == '/')
+		mntprfx++;
+	/* Skip trailing '/' */
+	for (p = strchr(mntprfx, '\0') - 1; p != mntprfx && *p == '/'; p--)
 		;
+	while (path[1] == '/')
+		path++;
 	if (strncmp(path, mntprfx, p - mntprfx + 1) == 0 &&
-	    path[p - mntprfx + 1] == '/')
-		(void)rmdir(path);
+	    path[p - mntprfx + 1] == '/') {
+		path += (p - mntprfx + 1) + 1;
+		while (path[0] == '/')
+			path++;
+		if (strlen(path) == 0 || strcmp(path, ".") == 0 ||
+		    strcmp(path, "..") == 0)
+			return;
+		(void)rmdir(_path);
+	}
 }
 
 /*
