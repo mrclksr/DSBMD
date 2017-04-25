@@ -39,8 +39,8 @@
 #define ENV_FILESYSTEM		"DSBMD_FILESYSTEM"
 #define ENV_MNTPT		"DSBMD_MNTPT"
 
-#define NGLBLPRFX		4
-#define GLBLPRFX		{ NULL, "label", "ufs", "ufsid" }
+#define NGLBLPRFX		5
+#define GLBLPRFX		{ NULL, "label", "ufs", "ufsid", "gptid" }
 
 #define PATH_DEVD_SOCKET	"/var/run/devd.pipe"
 
