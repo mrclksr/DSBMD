@@ -1656,7 +1656,7 @@ lookup_disktype(int type)
 static const dsktp_t *
 get_disktype(const char *dev, const dskcl_t *dc)
 {
-	int type;
+	int  type;
 	char *disk;
 	struct cam_device *cd;
 
@@ -1668,6 +1668,8 @@ get_disktype(const char *dev, const dskcl_t *dc)
 		return (lookup_disktype(type));
 	} else if (dc->class == FLOPPY)
 		return (lookup_disktype(DSK_TYPE_FLOPPY));
+	else if (dc->class == MMC)
+		return (lookup_disktype(DSK_TYPE_MMC));
 	else if (dc->system == CAM) {
 		disk = get_diskname(dev);
 		if ((cd = cam_open_device(disk, O_RDWR)) != NULL) {
