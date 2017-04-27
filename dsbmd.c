@@ -75,6 +75,7 @@
 #include <sys/iconv.h>
 
 #define MAXDEVS		64
+#define MNTDIRPERM	(S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	(sizeof(commands) / sizeof(struct command_s))
 #define NDISK_TYPES	(sizeof(disktypes) / sizeof(disktypes[0]))
 #define NDISK_CLASSES	(sizeof(disk_classes) / sizeof(disk_classes[0]))
@@ -1169,6 +1170,13 @@ mount_drive(client_t *cli, drive_t *drvp)
 	}
 
 	/* Create the mount point */
+	if (dsbcfg_getval(cfg, CFG_MNTDIR).string == NULL)
+		errx(EXIT_FAILURE, "mount_dir undefined");
+	if (mkdir(dsbcfg_getval(cfg, CFG_MNTDIR).string, MNTDIRPERM) == -1) {
+		if (errno != EEXIST)
+			err(EXIT_FAILURE, "mkdir(%s)",
+			    dsbcfg_getval(cfg, CFG_MNTDIR).string);
+	}
 	mntpath = malloc(strlen(dsbcfg_getval(cfg, CFG_MNTDIR).string) +
 	    strlen(drvp->name) + 2);
 	if (mntpath == NULL)
