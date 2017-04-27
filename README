@@ -18,8 +18,7 @@ Some features are:
 - For each supported filesystem, mount flags or external mount commands can be
   defined.
 
-- Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2fs, exFAT, ReiserFS,
-  and XFS.
+- Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2fs, and exFAT.
 
 - Mounts and unmounts not initiated though DSBMD are detected, and necessary
   action are taken.
@@ -30,6 +29,8 @@ Some features are:
 - Easy configuration through /usr/local/etc/dsbmd.conf
 
 - Support for FUSE
+
+- Support for memory disks (md)
 
 - Support for Linux LVM logical volumes through geom_linux_lvm(4)
 
