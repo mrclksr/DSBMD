@@ -83,7 +83,7 @@
 
 static int		get_cdrtype(const char *);
 static int		mymount(const char *, const char *, const char *,
-			    const char *);
+			    const char *, uid_t);
 static int		mount_drive(client_t *, drive_t *drvp);
 static int		unmount_drive(client_t *, drive_t *, bool, bool);
 static int		extend_iovec(struct iovec **, int *, const char *,
@@ -98,6 +98,7 @@ static bool		is_atapicam(const char *);
 static bool		is_mountable(const char *);
 static bool		is_mntpt(const char *);
 static bool		check_permission(uid_t, gid_t *);
+static bool		usermount_set(void);
 static FILE		*uconnect(const char *);
 static char		**extend_list(char **, int *, const char *);
 static char		*getmntpt(drive_t *);
@@ -107,6 +108,8 @@ static char		*get_diskname(const char *);
 static char		*get_lv_dev(const char *);
 static char		*dev_from_gptid(const char *);
 static void		usage(void);
+static void		switcheuid(uid_t);
+static void		restoreuid(void);
 static void		rmntpt(const char *);
 static void		cleanup(int);
 static void		del_drive(drive_t *);
@@ -1015,6 +1018,35 @@ free_iovec(struct iovec *iov)
 	errno = saved_errno;
 }
 
+/*
+ * Check whether vfs.usermount is set.
+ */
+static bool
+usermount_set()
+{
+	int    v;
+	size_t sz = sizeof(int);
+
+	if (sysctlbyname("vfs.usermount", &v, &sz, NULL, 0) == -1) {
+		warn("sysctlbyname()");
+		return (false);
+	}
+	return (v != 0 ? true : false);
+}
+
+static void
+switcheuid(uid_t uid)
+{
+	if (seteuid(uid) == -1)
+		warn("seteuid(%u)", uid);
+}
+
+static void
+restoreuid()
+{
+	switcheuid(getuid());
+}
+
 static int
 set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 {
@@ -1047,7 +1079,8 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 }
 
 static int
-mymount(const char *fs, const char *dir, const char *dev, const char *opts)
+mymount(const char *fs, const char *dir, const char *dev, const char *opts,
+	uid_t uid)
 {
 	int	     iovlen, ret;
 	char	     *p, *op, *q;
@@ -1079,7 +1112,11 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts)
 			warnx("set_msdosfs_locale() failed.");
 	}
 	errno = 0;
+	/* Mount as user if vfs.usermount is set */
+	if (usermount_set())
+		switcheuid(uid);
 	ret = nmount(iov, iovlen, 0);
+	restoreuid();
 	free_iovec(iov);
 
 	return (ret);
@@ -1251,7 +1288,13 @@ mount_drive(client_t *cli, drive_t *drvp)
 	errno = 0;
 
 	if (drvp->fs->mntcmd != NULL) {
-		/* Execute the userdefined mount command. */
+		/*
+		 * Execute the userdefined mount command.
+		 */
+	
+		/* Mount as user if vfs.usermount is set */
+		if (usermount_set())
+			switcheuid(cli->uid);
 		(void)snprintf(num, sizeof(num), "%u", cli->uid);
 		(void)setenv(ENV_UID, num, 1);
 		(void)snprintf(num, sizeof(num), "%u", cli->gids[0]);
@@ -1291,10 +1334,11 @@ mount_drive(client_t *cli, drive_t *drvp)
                                     cli->uid, error);
 			}
 		}
+		restoreuid();
 		return (error);
 	}
-	if (mymount(drvp->fs->name, mntpath, drvp->dev, mopts) == 0 ||
-	    mymount(drvp->fs->name, mntpath, drvp->dev, romopts) == 0) {
+	if (!mymount(drvp->fs->name, mntpath, drvp->dev, mopts, cli->uid)  ||
+	    !mymount(drvp->fs->name, mntpath, drvp->dev, romopts, cli->uid)) {
 		free(mntpath);
 		if (getmntpt(drvp) == NULL)
 			err(EXIT_FAILURE, "getmntpt()");
