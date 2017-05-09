@@ -83,7 +83,7 @@
 
 static int		get_cdrtype(const char *);
 static int		mymount(const char *, const char *, const char *,
-			    const char *, uid_t);
+			    const char *, uid_t, gid_t);
 static int		mount_drive(client_t *, drive_t *drvp);
 static int		unmount_drive(client_t *, drive_t *, bool, bool);
 static int		extend_iovec(struct iovec **, int *, const char *,
@@ -108,8 +108,8 @@ static char		*get_diskname(const char *);
 static char		*get_lv_dev(const char *);
 static char		*dev_from_gptid(const char *);
 static void		usage(void);
-static void		switcheuid(uid_t);
-static void		restoreuid(void);
+static void		switcheids(uid_t, gid_t);
+static void		restoreids(void);
 static void		rmntpt(const char *);
 static void		cleanup(int);
 static void		del_drive(drive_t *);
@@ -1035,16 +1035,18 @@ usermount_set()
 }
 
 static void
-switcheuid(uid_t uid)
+switcheids(uid_t euid, gid_t egid)
 {
-	if (seteuid(uid) == -1)
-		warn("seteuid(%u)", uid);
+	if (setegid(egid) == -1)
+		warn("setegid(%u)", egid);
+	if (seteuid(euid) == -1)
+		warn("seteuid(%u)", euid);
 }
 
 static void
-restoreuid()
+restoreids()
 {
-	switcheuid(getuid());
+	switcheids(getuid(), getgid());
 }
 
 static int
@@ -1080,7 +1082,7 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 
 static int
 mymount(const char *fs, const char *dir, const char *dev, const char *opts,
-	uid_t uid)
+	uid_t uid, gid_t gid)
 {
 	int	     iovlen, ret;
 	char	     *p, *op, *q;
@@ -1114,9 +1116,9 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts,
 	errno = 0;
 	/* Mount as user if vfs.usermount is set */
 	if (usermount_set())
-		switcheuid(uid);
+		switcheids(uid, gid);
 	ret = nmount(iov, iovlen, 0);
-	restoreuid();
+	restoreids();
 	free_iovec(iov);
 
 	return (ret);
@@ -1294,7 +1296,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 	
 		/* Mount as user if vfs.usermount is set */
 		if (usermount_set())
-			switcheuid(cli->uid);
+			switcheids(cli->uid, cli->gids[0]);
 		(void)snprintf(num, sizeof(num), "%u", cli->uid);
 		(void)setenv(ENV_UID, num, 1);
 		(void)snprintf(num, sizeof(num), "%u", cli->gids[0]);
@@ -1334,11 +1336,13 @@ mount_drive(client_t *cli, drive_t *drvp)
                                     cli->uid, error);
 			}
 		}
-		restoreuid();
+		restoreids();
 		return (error);
 	}
-	if (!mymount(drvp->fs->name, mntpath, drvp->dev, mopts, cli->uid)  ||
-	    !mymount(drvp->fs->name, mntpath, drvp->dev, romopts, cli->uid)) {
+	if (!mymount(drvp->fs->name, mntpath, drvp->dev, mopts, cli->uid,
+	    cli->gids[0]) ||
+	    !mymount(drvp->fs->name, mntpath, drvp->dev, romopts, cli->uid,
+	    cli->gids[0])) {
 		free(mntpath);
 		if (getmntpt(drvp) == NULL)
 			err(EXIT_FAILURE, "getmntpt()");
