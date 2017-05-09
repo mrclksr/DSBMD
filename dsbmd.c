@@ -1115,8 +1115,9 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts,
 			warnx("set_msdosfs_locale() failed.");
 	}
 	errno = 0;
-	/* Mount as user if vfs.usermount is set */
-	if (usermount_set())
+
+	/* Mount as user if "usermount" and vfs.usermount is set */
+	if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set())
 		switcheids(uid, gid);
 	ret = nmount(iov, iovlen, 0);
 	restoreids();
@@ -1295,8 +1296,9 @@ mount_drive(client_t *cli, drive_t *drvp)
 		 * Execute the userdefined mount command.
 		 */
 	
-		/* Mount as user if vfs.usermount is set */
-		if (usermount_set())
+		/* Mount as user if "usermount" and vfs.usermount is set */
+		if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean &&
+		    usermount_set())
 			switcheids(cli->uid, cli->gids[0]);
 		(void)snprintf(num, sizeof(num), "%u", cli->uid);
 		(void)setenv(ENV_UID, num, 1);

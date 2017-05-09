@@ -49,6 +49,7 @@ dsbcfg_vardef_t vardefs[] = {
 	{ "poll_interval",      DSBCFG_VAR_INTEGER, CFG_POLL_INTERVAL	 },
 	{ "poll_exceptions",    DSBCFG_VAR_STRINGS, CFG_POLL_EXCEPTIONS  },
 	{ "allow_users",        DSBCFG_VAR_STRINGS, CFG_ALLOW_USERS	 },
-	{ "allow_groups",       DSBCFG_VAR_STRINGS, CFG_ALLOW_GROUPS	 }
+	{ "allow_groups",       DSBCFG_VAR_STRINGS, CFG_ALLOW_GROUPS	 },
+	{ "usermount",		DSBCFG_VAR_BOOLEAN, CFG_USERMOUNT	 }
 };
 
