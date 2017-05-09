@@ -69,6 +69,8 @@
 #define ERR_UNKNOWN_ERROR	((1 << 8) + 0x0d)
 #define ERR_MNTCMD_FAILED	((1 << 8) + 0x0e)
 #define ERR_INVALID_ARGUMENT	((1 << 8) + 0x0f)
+#define ERR_STRING_TOO_LONG	((1 << 8) + 0x10)
+#define ERR_BAD_STRING		((1 << 8) + 0x11)
 
 /*
  * Devices to look for
