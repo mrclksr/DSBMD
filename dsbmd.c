@@ -91,6 +91,7 @@ static int		extend_iovec(struct iovec **, int *, const char *,
 static int		eject_media(client_t *, drive_t *, bool);
 static int		set_cdrspeed(client_t *, drive_t *, int);
 static int		set_msdosfs_locale(const char *, struct iovec**, int *);
+static int		waitforbytes(FILE *);
 static bool		match_part_dev(const char *, size_t);
 static bool		has_media(const char *);
 static bool		is_parted(const char *);
@@ -2510,6 +2511,23 @@ notifybc(drive_t *drvp, bool add)
 		notify(clients[i], drvp, add);
 }
 
+static int
+waitforbytes(FILE *s)
+{
+	int    n;
+	fd_set rset;
+
+	FD_ZERO(&rset);
+	FD_SET(fileno(s), &rset);
+	while ((n = select(fileno(s) + 1, &rset, 0, 0, 0)) < 0) {
+		if (errno == EINTR)
+			continue;
+		else
+			err(EXIT_FAILURE, "select()");
+	}
+	return (n);
+}
+
 /*
  * Client thread function - Reads lines from the client's socket, parses
  * them and takes actions accordingly.
@@ -2517,25 +2535,47 @@ notifybc(drive_t *drvp, bool add)
 static void *
 serve_client(void *cp)
 {
+	int	 c, n, rd;
 	char	 buf[64];
-	fd_set	 rset;
+	bool	 badchar;
 	client_t *cli;
 
 	cli = (client_t *)cp;
 	for (;;) {
-		FD_ZERO(&rset);
-		FD_SET(fileno(cli->s), &rset);
-		if (select(fileno(cli->s) + 1, &rset, NULL, NULL, NULL) <= 0)
-			continue;
-		if (fgets(buf, sizeof(buf), cli->s) == NULL)
-			break;
-		exec_cmd(cli, buf);
+		(void)waitforbytes(cli->s);
+		/*
+		 * Read a line from socket. If the line is longer than
+		 * sizeof(buf), or if it contains unprintable bytes, read
+		 * until end of line, and send the client an error message.
+		 */
+		for (badchar = false, c = n = rd = 0; c != '\n'; rd++) {
+			if ((c = fgetc(cli->s)) == EOF) {
+				if (feof(cli->s)) {
+					/* Client disconnected. */
+					(void)pthread_mutex_lock(&cli_mtx);
+					del_client(cli);
+					(void)pthread_mutex_unlock(&cli_mtx);
+	
+					return (NULL);
+				} else if (errno == EAGAIN || errno == EINTR)
+					(void)waitforbytes(cli->s);
+				else
+					err(EXIT_FAILURE, "fgetc()");
+			}
+			if (n < sizeof(buf) - 1)
+				buf[n++] = c;
+			buf[n] = '\0';
+			if (c != '\n' && !isprint(c))
+				badchar = true;
+		}
+		if (badchar)
+			cliprint(cli, "E:code=%d\n", ERR_BAD_STRING);
+		else if (n != rd)
+			cliprint(cli, "E:code=%d\n", ERR_STRING_TOO_LONG);
+		else
+			exec_cmd(cli, buf);
 	}
-	/* Client disconnected. */
-	(void)pthread_mutex_lock(&cli_mtx);
-	del_client(cli);
-	(void)pthread_mutex_unlock(&cli_mtx);
-
+	/* NOTREACHED */
 	return (NULL);
 }
 
