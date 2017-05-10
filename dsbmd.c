@@ -110,6 +110,7 @@ static char		*get_diskname(const char *);
 static char		*get_lv_dev(const char *);
 static char		*dev_from_gptid(const char *);
 static void		process_devd_event(char *);
+static void		process_connreq(int);
 static void		usage(void);
 static void		switcheids(uid_t, gid_t);
 static void		restoreids(void);
@@ -202,22 +203,20 @@ static pthread_mutex_t drv_mtx;		/* Mutex for drive list mods. */
 int
 main(int argc, char *argv[])
 {
-	int	       i, upoll, spoll, ls, cs, sflags, maxfd, ch;
+	int	       i, upoll, spoll, ls, sflags, maxfd, ch;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag;
 	FILE	       *s, *fp;
 	char	       lvmpath[512], *ev, **v;
 	fd_set	       allset, rset;
 	drive_t	       *drvp;
-	client_t       *cli;
 	pthread_t      thr;
-	socklen_t      clen;
 	struct stat    sb;
 	struct group   *gr;
 	struct passwd  *pw;
 	struct dirent  *dp, *dp2;
 	struct timeval tv;
-	struct sockaddr_un c_addr, s_addr;
+	struct sockaddr_un s_addr;
 
 	fflag = false;
 	while ((ch = getopt(argc, argv, "fh")) != -1) {
@@ -493,28 +492,7 @@ main(int argc, char *argv[])
 		} 
 		if (FD_ISSET(ls, &rset)) {
 			/* A client has connected. */
-			cs = accept(ls, (struct sockaddr *)&c_addr, &clen);
-			if (cs == -1) {
-				switch (errno) {
-				case EINTR: case EWOULDBLOCK: case ECONNABORTED:
-					continue;
-				default:
-					err(EXIT_FAILURE, "accept()");
-				}
-			}
-			(void)pthread_mutex_lock(&cli_mtx);
-			if ((cli = add_client(cs)) == NULL) {
-				if (errno != 0)
-					logprint("add_client()");
-			} else {
-				if (pthread_create(&thr, NULL, serve_client,
-				    cli) == 0) {
-					if (pthread_detach(thr))
-						logprint("pthread_detach()");
-				} else
-					logprint("pthread_create()");
-			}
-			(void)pthread_mutex_unlock(&cli_mtx);
+			process_connreq(ls);
 		}
 	}
 	/* NOTREACHED */
@@ -658,6 +636,38 @@ del_client(client_t *cli)
 	for (; i < nclients - 1; i++)
 		clients[i] = clients[i + 1];
 	nclients--;
+}
+
+static void
+process_connreq(int ls)
+{
+	int cs;
+	client_t	   *cli;
+	pthread_t	   thr;
+	socklen_t	   clen;
+	struct sockaddr_un c_addr;
+
+	cs = accept(ls, (struct sockaddr *)&c_addr, &clen);
+	if (cs == -1) {
+		switch (errno) {
+		case EINTR: case EWOULDBLOCK: case ECONNABORTED:
+			return;
+		default:
+			err(EXIT_FAILURE, "accept()");
+		}
+	}
+	(void)pthread_mutex_lock(&cli_mtx);
+	if ((cli = add_client(cs)) == NULL) {
+		if (errno != 0)
+			logprint("add_client()");
+	} else {
+		if (pthread_create(&thr, NULL, serve_client, cli) == 0) {
+			if (pthread_detach(thr))
+				logprint("pthread_detach() failed");
+		} else
+			logprint("pthread_create() failed");
+	}
+	(void)pthread_mutex_unlock(&cli_mtx);
 }
 
 static char *
