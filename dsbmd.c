@@ -1029,7 +1029,7 @@ usermount_set()
 	size_t sz = sizeof(int);
 
 	if (sysctlbyname("vfs.usermount", &v, &sz, NULL, 0) == -1) {
-		warn("sysctlbyname()");
+		logprint("sysctlbyname()");
 		return (false);
 	}
 	return (v != 0 ? true : false);
@@ -1039,9 +1039,9 @@ static void
 switcheids(uid_t euid, gid_t egid)
 {
 	if (setegid(egid) == -1)
-		warn("setegid(%u)", egid);
+		logprint("setegid(%u)", egid);
 	if (seteuid(euid) == -1)
-		warn("seteuid(%u)", euid);
+		logprint("seteuid(%u)", euid);
 }
 
 static void
@@ -1057,16 +1057,16 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 
 	if (modfind("msdosfs_iconv") == -1) {
 		if (errno != ENOENT) {
-			warn("modfind(msdosfs_iconv) failed.");
+			logprint("modfind(msdosfs_iconv) failed.");
 			return (-1);
 		}
 		if (kldload("msdosfs_iconv") == -1 && errno != EEXIST) {
-			warn("kldload(msdosfs_iconv)");
+			logprint("kldload(msdosfs_iconv)");
 			return (-1);
 		}
 	}
 	if ((cs = strchr(locale, '.')) == NULL) {
-		warnx("Invalid locale string '%s'", locale);
+		logprintx("Invalid locale string '%s'", locale);
 		return (-1);
 	}
 	locale = kiconv_quirkcs(cs + 1, KICONV_VENDOR_MICSFT);
@@ -1112,7 +1112,7 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts,
 		if (set_msdosfs_locale(
 		    dsbcfg_getval(cfg, CFG_MSDOSFS_LOCALE).string,
 		    &iov, &iovlen) == -1)
-			warnx("set_msdosfs_locale() failed.");
+			logprintx("set_msdosfs_locale() failed.");
 	}
 	errno = 0;
 
@@ -1579,12 +1579,12 @@ get_cdrtype(const char *path)
 		return (CDR_TYPE_UNKNOWN);
 	buf = NULL; type = CDR_TYPE_UNKNOWN;
 	if ((fd = open(path, O_RDONLY)) == -1) {
-		warn("open()");
+		logprint("open()");
 		goto error;
 	}
 	/* Check whether the drive has a valid media. */
 	if (ioctl(fd, DIOCGMEDIASIZE, &msz) == -1 || msz <= 0) {
-		warn("mediasize");
+		logprint("mediasize");
 		goto done;
 	}
 	/*
@@ -1594,7 +1594,7 @@ get_cdrtype(const char *path)
 	 */
 	(void)close(fd);
 	if ((fd = open(path, O_RDONLY)) == -1) {
-		warn("open()");
+		logprint("open()");
 		goto error;
 	}
 	if ((pbs = g_sectorsize(fd)) == -1)
@@ -1890,10 +1890,10 @@ add_drive(const char *dev)
 			drives[ndrives]->dt = get_disktype(path, drv.dc);
 		} else {
 			if (errno != 0) {
-				warn("Couldn't get physical device of %s",
+				logprint("Couldn't get physical device of %s",
 				    dev);
 			} else {
-				warnx("Couldn't get physical device of %s",
+				logprintx("Couldn't get physical device of %s",
 				    dev);
 			}
 			ndrives++;
