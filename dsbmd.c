@@ -101,6 +101,7 @@ static bool		is_mntpt(const char *);
 static bool		check_permission(uid_t, gid_t *);
 static bool		usermount_set(void);
 static FILE		*uconnect(const char *);
+static char		*read_devd_event(FILE *);
 static char		**extend_list(char **, int *, const char *);
 static char		*getmntpt(drive_t *);
 static char		*get_cam_modelname(const char *);
@@ -108,6 +109,7 @@ static char		*get_ata_modelname(const char *);
 static char		*get_diskname(const char *);
 static char		*get_lv_dev(const char *);
 static char		*dev_from_gptid(const char *);
+static void		process_devd_event(char *);
 static void		usage(void);
 static void		switcheids(uid_t, gid_t);
 static void		restoreids(void);
@@ -204,7 +206,7 @@ main(int argc, char *argv[])
 	DIR	       *dirp, *dirp2;
 	bool	       fflag;
 	FILE	       *s, *fp;
-	char	       lvmpath[512], *buf, **v;
+	char	       lvmpath[512], *ev, **v;
 	fd_set	       allset, rset;
 	drive_t	       *drvp;
 	client_t       *cli;
@@ -449,9 +451,6 @@ main(int argc, char *argv[])
 	FD_ZERO(&allset);
 	FD_SET(ls, &allset); FD_SET(fileno(s), &allset);
 
-	if ((buf = malloc(_POSIX2_LINE_MAX)) == NULL)
-		err(EXIT_FAILURE, "malloc()");
-
 	/* Start thread that checks the mount table for changes. */
 	if (pthread_create(&thr, NULL, thr_check_mntbl, NULL) == 0)
 		(void)pthread_detach(thr);
@@ -483,26 +482,8 @@ main(int argc, char *argv[])
 		}
 		if (s != NULL && FD_ISSET(fileno(s), &rset)) {
 			/* New devd event. */
-			while (fgets(buf, _POSIX2_LINE_MAX, s) != NULL) {
-				if (buf[0] != '!')
-					continue;
-				parse_devd_event(buf + 1);
-				if (strcmp(devdevent.system, "DEVFS") != 0 ||
-				    strcmp(devdevent.subsystem, "CDEV") != 0)
-					continue;
-				if (strcmp(devdevent.type, "CREATE") == 0) {
-					(void)pthread_mutex_lock(&drv_mtx);
-					add_drive(devdevent.cdev);
-					(void)pthread_mutex_unlock(&drv_mtx);
-				} else if (strcmp(devdevent.type,
-				    "DESTROY") == 0) {
-					(void)pthread_mutex_lock(&drv_mtx);
-					drvp = lookupdrv(devdevent.cdev);
-					if (drvp != NULL)
-						del_drive(drvp);
-					(void)pthread_mutex_unlock(&drv_mtx);
-				}
-			}
+			while ((ev = read_devd_event(s)) != NULL)
+				process_devd_event(ev);
 			if (feof(s)) {
 				/* Lost connection to devd. */
 				FD_CLR(fileno(s), &allset);
@@ -677,6 +658,63 @@ del_client(client_t *cli)
 	for (; i < nclients - 1; i++)
 		clients[i] = clients[i + 1];
 	nclients--;
+}
+
+static char *
+read_devd_event(FILE *fp)
+{
+	int	      c;
+	static char   *buf = NULL;
+	static size_t len, sz = 0;
+
+	if (buf == NULL) {
+		if ((buf = malloc(_POSIX2_LINE_MAX)) == NULL)
+			err(EXIT_FAILURE, "malloc()");
+		sz = _POSIX2_LINE_MAX;
+	}
+	for (len = 0;;) {
+		if (sz - len - 1 <= 0) {
+			if ((buf = realloc(buf, sz + 64)) == NULL)
+				err(EXIT_FAILURE, "realloc()");
+			sz += 64;
+		}
+		if ((c = fgetc(fp)) == EOF) {
+			if (feof(fp) || errno == EAGAIN)
+				return (NULL);
+			else if (errno == EINTR)
+				continue;
+			else
+				err(EXIT_FAILURE, "fgetc()");
+		}
+		buf[len++] = c; buf[len] = '\0';
+		if (c == '\n')
+			return (buf);
+	}
+	/* NOTREACHED */
+}
+
+static void
+process_devd_event(char *ev)
+{
+	drive_t *drvp;
+
+	if (ev[0] != '!')
+		return;
+	parse_devd_event(ev + 1);
+	if (strcmp(devdevent.system, "DEVFS") != 0 ||
+	    strcmp(devdevent.subsystem, "CDEV") != 0)
+		return;
+	if (strcmp(devdevent.type, "CREATE") == 0) {
+		(void)pthread_mutex_lock(&drv_mtx);
+		add_drive(devdevent.cdev);
+		(void)pthread_mutex_unlock(&drv_mtx);
+	} else if (strcmp(devdevent.type, "DESTROY") == 0) {
+		(void)pthread_mutex_lock(&drv_mtx);
+		drvp = lookupdrv(devdevent.cdev);
+		if (drvp != NULL)
+			del_drive(drvp);
+		(void)pthread_mutex_unlock(&drv_mtx);
+	}
 }
 
 static void
