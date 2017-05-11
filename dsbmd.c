@@ -67,6 +67,8 @@
 #include <libgeom.h>
 #include <libutil.h>
 #include <isofs/cd9660/iso.h>
+#include <libusb20_desc.h>
+#include <libusb20.h>
 #include "common.h"
 #include "fs.h"
 #include "dsbmd.h"
@@ -98,6 +100,7 @@ static bool		is_parted(const char *);
 static bool		is_atapicam(const char *);
 static bool		is_mountable(const char *);
 static bool		is_mntpt(const char *);
+static bool		is_mtp_dev(const char *);
 static bool		check_permission(uid_t, gid_t *);
 static bool		usermount_set(void);
 static FILE		*uconnect(const char *);
@@ -140,11 +143,13 @@ static void		check_fuse_mount(struct statfs *sb, int nsb);
 static void		check_fuse_unmount(struct statfs *, int);
 static void		*thr_check_mntbl(void *);
 static drive_t		*add_drive(const char *);
+static drive_t		*add_mtp_device(const char *);
 static drive_t		*media_changed(void);
 static drive_t		*lookupdrv(const char *);
 static client_t		*add_client(int);
 static const dskcl_t	*match_disk_pattern(const char *);
 static const dsktp_t	*get_disktype(const char *, const dskcl_t *);
+
 
 /*
  * Struct to represent the fields of a devd notify event.
@@ -164,7 +169,8 @@ const dsktp_t disktypes[] = {
 	{ CDR_TYPE_SVCD,    "SVCD"	 }, { CDR_TYPE_DVD,	"DVD"	    },
 	{ CDR_TYPE_AUDIO,   "AUDIOCD"	 }, { CDR_TYPE_DATA,	"DATACD"    },
 	{ DSK_TYPE_FLOPPY,  "FLOPPY"	 }, { CDR_TYPE_UNKNOWN, "UNKNOWNCD" },
-	{ DSK_TYPE_USBDISK, "USBDISK"    }, { DSK_TYPE_FUSE, 	"HDD"	    }
+	{ DSK_TYPE_USBDISK, "USBDISK"    }, { DSK_TYPE_FUSE, 	"HDD"	    },
+	{ DSK_TYPE_MTP,	    "USBDISK"	 }
 };
 
 const dskcl_t disk_classes[] = {
@@ -173,7 +179,8 @@ const dskcl_t disk_classes[] = {
 	{ CAM,   CDROM,  "cd"	      }, { CAM,   MSD,   "ada"	      },
 	{ MMC,   MSD,    "mmcsd"      }, { OTHER, MD,    "md"	      },
 	{ OTHER, FUSE,	 ""           }, { OTHER, LLV,   "linux_lvm/" },
-	{ CAM,   LLV,	 "linux_lvm/" }, { ATA,	  LLV,	 "linux_lvm/" }
+	{ CAM,   LLV,	 "linux_lvm/" }, { ATA,	  LLV,	 "linux_lvm/" },
+	{ USB,	 MTP,	 "ugen"	      }
 };
 
 /*
@@ -338,6 +345,10 @@ main(int argc, char *argv[])
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_XFS_MNTCMD).string;
 			break;
+		case MTPFS:
+			fstype[i].mntcmd = dsbcfg_getval(cfg,
+			    CFG_MTPFS_MNTCMD).string;
+			break;
 		default:
 			/* Just to soothe clang. */
 			break;
@@ -393,7 +404,10 @@ main(int argc, char *argv[])
 		if (lstat(dp->d_name, &sb) == -1) {
 			logprint("stat(%s)", dp->d_name);
 			continue;
-		} else if (S_ISLNK(sb.st_mode)) { 
+		}
+		if (strncmp(dp->d_name, "ugen", 4) == 0)
+			add_drive(dp->d_name);
+		else if (S_ISLNK(sb.st_mode)) { 
 			/* Skip symlinks */
 			continue;
 		} else if (S_ISDIR(sb.st_mode) &&
@@ -414,6 +428,7 @@ main(int argc, char *argv[])
 		} else
 			add_drive(dp->d_name);
 	}
+
 	(void)closedir(dirp);
 	if (chdir("/") == -1)
 		err(EXIT_FAILURE, "chdir(/)");
@@ -1343,7 +1358,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 		/*
 		 * Execute the userdefined mount command.
 		 */
-	
+
 		/* Mount as user if "usermount" and vfs.usermount is set */
 		if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean &&
 		    usermount_set())
@@ -1792,6 +1807,53 @@ get_disktype(const char *dev, const dskcl_t *dc)
 }
 
 static drive_t *
+add_mtp_device(const char *ugen)
+{
+	int	   i, len;
+	drive_t	   **drvp;
+	const char *dev;
+
+	dev = devbasename(dev);
+	/* Check if we already have this device. */
+	len = strlen(dev);
+	for (i = 0; i < ndrives; i++) {
+		if (strcmp(dev, drives[i]->dev + sizeof(_PATH_DEV) - 1) == 0) {
+			/* Device already exists. */
+			return (NULL);
+		}
+	}
+	drvp = realloc(drives, sizeof(drive_t *) * (ndrives + 1));
+	if (drvp == NULL)
+		err(EXIT_FAILURE, "realloc()");
+	drives = drvp;
+	if ((drives[ndrives] = malloc(sizeof(drive_t))) == NULL)
+		err(EXIT_FAILURE, "malloc()");
+	if ((drives[ndrives]->dev = strdup(devpath(ugen))) == NULL)
+		err(EXIT_FAILURE, "strdup()");
+	if ((drives[ndrives]->name = strdup(devbasename(ugen))) == NULL)
+		err(EXIT_FAILURE, "strdup()");
+	for (i = 0; i < NDISK_CLASSES && disk_classes[i].class != MTP; i++)
+		;
+	drives[ndrives]->dc	   = &disk_classes[i];
+	for (i = 0; i < NFSTYPES && fstype[i].id != MTPFS; i++)
+		;
+	drives[ndrives]->fs	   = &fstype[i];
+	for (i = 0;
+	    i < NDISK_TYPES && disktypes[i].dt_type != DSK_TYPE_MTP; i++)
+		;
+	drives[ndrives]->dt	   = &disktypes[i];
+	drives[ndrives]->glabel[0] = NULL;
+	drives[ndrives]->mounted   = false;
+	drives[ndrives]->has_media = true;
+	drives[ndrives]->polling   = false;
+	drives[ndrives]->mntpt	   = NULL;
+	(void)pthread_mutex_init(&drives[ndrives]->mtx, NULL);
+	notifybc(drives[ndrives], true);
+
+	return (drives[ndrives++]);
+}
+
+static drive_t *
 add_fuse_device(const char *mntpt)
 {
 	int	   i;
@@ -1858,6 +1920,11 @@ add_drive(const char *dev)
 	}
 	if ((drv.dc = match_disk_pattern(dev)) == NULL)
 		return (NULL);
+	if (drv.dc->class == MTP) {
+		if (is_mtp_dev(dev))
+			return (add_mtp_device(dev));
+		return (NULL);
+	}
 	if (!is_mountable(dev))
 		return (NULL);
 	if (drv.dc->class == CDROM) {
@@ -2061,6 +2128,68 @@ match_disk_pattern(const char *str)
 		}
 	}
 	return (NULL);
+}
+
+
+static bool
+is_mtp_dev(const char *ugen)
+{
+	int  i, j, n, bus, addr;
+	bool found;
+	char buf[256], num[4];
+	struct libusb20_device	*pdev;
+	struct libusb20_config	*cfg;
+	struct libusb20_backend	*pbe;
+	struct LIBUSB20_DEVICE_DESC_DECODED    *ddesc;
+	struct LIBUSB20_INTERFACE_DESC_DECODED *idesc;
+
+	if (strncmp(ugen, "ugen", 4) != 0)
+		return (false);
+	ugen += 4;
+
+	for (n = 0; n < 4 && isdigit(*ugen);)
+		num[n++] = *ugen++;
+	if (*ugen++ != '.')
+		return (false);
+	num[n] = '\0';
+	bus = strtol(num, NULL, 10);
+
+	for (n = 0; n < 3 && isdigit(*ugen);)
+		num[n++] = *ugen++;
+	if (*ugen != '\0')
+		return (false);
+	num[n] = '\0';
+	addr = strtol(num, NULL, 10);
+
+	pbe = libusb20_be_alloc_default();
+	for (found = false, pdev = NULL;
+	    !found && (pdev = libusb20_be_device_foreach(pbe, pdev));) {
+		if (libusb20_dev_get_bus_number(pdev) != bus ||
+		    libusb20_dev_get_address(pdev) != addr)
+			continue;
+		if (libusb20_dev_open(pdev, 0))
+			err(EXIT_FAILURE, "could not open device");
+		ddesc = libusb20_dev_get_device_desc(pdev);
+		for (i = 0; i !=  ddesc->bNumConfigurations; i++) {
+			cfg = libusb20_dev_alloc_config(pdev, i);
+			if (cfg == NULL)
+				continue;
+			for (j = 0; j != cfg->num_interface; j++) {
+				idesc = &(cfg->interface[j].desc);
+				if (libusb20_dev_req_string_simple_sync(pdev,
+				    idesc->iInterface, buf, sizeof(buf)) != 0)
+					continue;
+				else if (strcmp(buf, "MTP") == 0)
+					found = true;
+			}
+			free(cfg);
+		}
+		if (libusb20_dev_close(pdev))
+                        err(EXIT_FAILURE, "could not close device");
+	}
+	libusb20_be_free(pbe);
+
+	return (found);
 }
 
 static char *
@@ -2730,6 +2859,12 @@ cmd_size(client_t *cli, char **argv)
 		    (uint64_t)(s.f_bsize  * s.f_bfree),
 		    (uint64_t)(s.f_bsize  * (s.f_blocks - s.f_bfree)));
 	} else {
+		if (drvp->dt->dt_type == DSK_TYPE_MTP) {
+			cliprint(cli,
+			    "O:command=size:dev=%s:mediasize=0:free=0:used=0",
+			    drvp->dev);
+			return;
+		}
 		if ((fd = open(drvp->dev, O_RDONLY | O_NONBLOCK)) == -1) {
 			cliprint(cli, "E:command=size:code=%d", errno);
 			(void)pthread_mutex_unlock(&drvp->mtx);

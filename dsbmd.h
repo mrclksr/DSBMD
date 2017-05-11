@@ -80,6 +80,7 @@ typedef struct dskcl_s {
 #define ATA	0x00
 #define CAM 	0x01
 #define MMC	0x02
+#define USB	0x03
 #define OTHER	0xff
 	char class;
 #define CDROM 	0x00
@@ -88,13 +89,15 @@ typedef struct dskcl_s {
 #define MD	0x03			 /* Memory disk */
 #define FUSE	0x04
 #define LLV	0x05
+#define MTP	0x06
 	const char *pattern;		 /* ad, da, cd ... */
 } dskcl_t;
 
 enum DSK_TYPES {
 	CDR_TYPE_RAW,	CDR_TYPE_VCD,  CDR_TYPE_SVCD,	 CDR_TYPE_DVD,
 	CDR_TYPE_AUDIO, CDR_TYPE_DATA, CDR_TYPE_UNKNOWN, DSK_TYPE_USBDISK,
-	DSK_TYPE_HDD,	DSK_TYPE_FLOPPY, DSK_TYPE_MMC, DSK_TYPE_FUSE
+	DSK_TYPE_HDD,	DSK_TYPE_FLOPPY, DSK_TYPE_MMC, DSK_TYPE_FUSE,
+	DSK_TYPE_MTP
 };
 
 /*

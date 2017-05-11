@@ -91,7 +91,8 @@ fs_t fstype[] = {
 	{ "exfat",    EXFAT,   NULL, NULL,    NULL		    },
 	{ "reiserfs", REISERFS,NULL, NULL,    NULL		    },
 	{ "xfs",      XFS,     NULL, NULL,    NULL		    },
-	{ "fuse",     FUSEFS,  NULL, NULL,    NULL		    }
+	{ "fuse",     FUSEFS,  NULL, NULL,    NULL		    },
+	{ "mtp",      MTPFS,   NULL, NULL,    NULL		    }
 };
 
 static struct getfs_s {
