@@ -23,7 +23,7 @@ BSD_INSTALL_DATA    ?= install -m 0644
 BSD_INSTALL_SCRIPT  ?= install -m 555
 BSD_INSTALL_PROGRAM ?= install -s -m 555
 
-all: ${PROGRAM} ${RCSCRIPT}
+all: ${PROGRAM} ${RCSCRIPT} ${CFGFILE}
 
 ${PROGRAM}: ${SOURCES}
 	${CC} -o ${PROGRAM} ${PROGRAM_FLAGS} ${SOURCES} ${PROGRAM_LIBS}
@@ -32,6 +32,10 @@ ${RCSCRIPT}: ${RCSCRIPT}.tmpl
 	sed -e 's|@PATH_PROGRAM@|${BINDIR}/${PROGRAM}|g' \
 	    -e 's|@PATH_PIDFILE@|${PIDFILE}|g' \
 	< ${.ALLSRC} > ${RCSCRIPT}
+
+${CFGFILE}: ${CFGFILE}.tmpl
+	sed -e 's|@SCRIPTDIR@|${SCRIPTDIR}|g' \
+	< ${.ALLSRC} > ${CFGFILE}
 
 install: ${PROGRAM} ${RCSCRIPT}
 	${BSD_INSTALL_PROGRAM} ${PROGRAM} ${DESTDIR}${BINDIR}
@@ -48,4 +52,5 @@ install: ${PROGRAM} ${RCSCRIPT}
 clean:
 	-rm -f ${PROGRAM}
 	-rm -f ${RCSCRIPT}
+	-rm -f ${CFGFILE}
 

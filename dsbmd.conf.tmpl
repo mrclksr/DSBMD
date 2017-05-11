@@ -94,13 +94,13 @@ ufs_opts = "rw,noatime,nosuid"
 #
 # cd9660_mount_cmd =
 # msdosfs_mount_cmd =
-# ntfs_mount_cmd =
 # ufs_mount_cmd = 
 # ext_mount_cmd =
 # exfat_mount_cmd =
 # reiserfs_mount_cmd =
 # xfs_mount_cmd =
-# mtpfs_mount_cmd =
+ntfs_mount_cmd = @SCRIPTDIR@/mount_ntfs.sh
+mtpfs_mount_cmd = @SCRIPTDIR@/mount_mtpfs.sh
 
 # allow_users - Comma separated list of users who are allowed to connect.
 # allow_users = jondoe, janedoe
