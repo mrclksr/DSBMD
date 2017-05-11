@@ -34,6 +34,7 @@ Some features are:
 
 - Support for Linux LVM logical volumes through geom_linux_lvm(4)
 
+- Support for MTP devices
 
 FILES USED
 
