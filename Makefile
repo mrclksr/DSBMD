@@ -10,6 +10,8 @@ RCDIR	       	     = ${PREFIX}/etc/rc.d
 CFGDIR	       	     = ${PREFIX}/etc
 DOCSDIR		    ?= ${PREFIX}/share/doc/${PROGRAM}
 DOCS		     = README
+SCRIPTDIR	     = ${PREFIX}/libexec/dsbmd-scripts
+SCRIPTS		     = scripts/mount_mtpfs.sh scripts/mount_ntfs.sh
 SOURCES		     = ${PROGRAM}.c config.c dsbcfg/dsbcfg.c fs.c common.c
 PROGRAM_FLAGS	     = -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_LOG=\"${LOGFILE}\"
@@ -39,6 +41,8 @@ install: ${PROGRAM} ${RCSCRIPT}
 		${BSD_INSTALL_DATA} ${CFGFILE} ${DESTDIR}${CFGDIR}; \
 	fi
 	-@mkdir ${DESTDIR}${DOCSDIR}
+	-@mkdir ${DESTDIR}${SCRIPTDIR}
+	${BSD_INSTALL_SCRIPT} ${SCRIPTS} ${DESTDIR}${SCRIPTDIR}
 	${BSD_INSTALL_DATA} ${DOCS} ${DESTDIR}${DOCSDIR}
 
 clean:
