@@ -102,6 +102,7 @@ static bool		is_mountable(const char *);
 static bool		is_mntpt(const char *);
 static bool		is_mtp_dev(const char *);
 static bool		check_permission(uid_t, gid_t *);
+static bool		get_ugen_bus_and_addr(const char *, int *, int *);
 static bool		usermount_set(void);
 static FILE		*uconnect(const char *);
 static char		*read_devd_event(FILE *);
@@ -111,6 +112,7 @@ static char		*get_cam_modelname(const char *);
 static char		*get_ata_modelname(const char *);
 static char		*get_diskname(const char *);
 static char		*get_lv_dev(const char *);
+static char		*get_mtp_label(const char *);
 static char		*dev_from_gptid(const char *);
 static void		process_devd_event(char *);
 static void		process_connreq(int);
@@ -1813,7 +1815,7 @@ add_mtp_device(const char *ugen)
 	drive_t	   **drvp;
 	const char *dev;
 
-	dev = devbasename(dev);
+	dev = devbasename(ugen);
 	/* Check if we already have this device. */
 	len = strlen(dev);
 	for (i = 0; i < ndrives; i++) {
@@ -1828,10 +1830,13 @@ add_mtp_device(const char *ugen)
 	drives = drvp;
 	if ((drives[ndrives] = malloc(sizeof(drive_t))) == NULL)
 		err(EXIT_FAILURE, "malloc()");
-	if ((drives[ndrives]->dev = strdup(devpath(ugen))) == NULL)
+	if ((drives[ndrives]->dev = strdup(devpath(dev))) == NULL)
 		err(EXIT_FAILURE, "strdup()");
-	if ((drives[ndrives]->name = strdup(devbasename(ugen))) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+	if ((drives[ndrives]->name = get_mtp_label(dev)) != NULL) {
+		drives[ndrives]->name = strdup(drives[ndrives]->name);
+		if (drives[ndrives]->name == NULL)
+			err(EXIT_FAILURE, "strdup()");
+	}
 	for (i = 0; i < NDISK_CLASSES && disk_classes[i].class != MTP; i++)
 		;
 	drives[ndrives]->dc	   = &disk_classes[i];
@@ -2130,37 +2135,46 @@ match_disk_pattern(const char *str)
 	return (NULL);
 }
 
-
 static bool
-is_mtp_dev(const char *ugen)
+get_ugen_bus_and_addr(const char *ugen, int *bus, int *addr)
 {
-	int  i, j, n, bus, addr;
-	bool found;
-	char buf[256], num[4];
-	struct libusb20_device	*pdev;
-	struct libusb20_config	*cfg;
-	struct libusb20_backend	*pbe;
-	struct LIBUSB20_DEVICE_DESC_DECODED    *ddesc;
-	struct LIBUSB20_INTERFACE_DESC_DECODED *idesc;
+	int  n;
+	char num[4];
 
 	if (strncmp(ugen, "ugen", 4) != 0)
 		return (false);
 	ugen += 4;
-
 	for (n = 0; n < 4 && isdigit(*ugen);)
 		num[n++] = *ugen++;
 	if (*ugen++ != '.')
 		return (false);
 	num[n] = '\0';
-	bus = strtol(num, NULL, 10);
+	*bus = strtol(num, NULL, 10);
 
 	for (n = 0; n < 3 && isdigit(*ugen);)
 		num[n++] = *ugen++;
 	if (*ugen != '\0')
 		return (false);
 	num[n] = '\0';
-	addr = strtol(num, NULL, 10);
+	*addr = strtol(num, NULL, 10);
+	
+	return (true);
+}
+	
+static bool
+is_mtp_dev(const char *ugen)
+{
+	int  i, j, bus, addr;
+	bool found;
+	char buf[256];
+	struct libusb20_device	*pdev;
+	struct libusb20_config	*cfg;
+	struct libusb20_backend	*pbe;
+	struct LIBUSB20_DEVICE_DESC_DECODED    *ddesc;
+	struct LIBUSB20_INTERFACE_DESC_DECODED *idesc;
 
+	if (!get_ugen_bus_and_addr(ugen, &bus, &addr))
+		return (false);
 	pbe = libusb20_be_alloc_default();
 	for (found = false, pdev = NULL;
 	    !found && (pdev = libusb20_be_device_foreach(pbe, pdev));) {
@@ -2168,7 +2182,7 @@ is_mtp_dev(const char *ugen)
 		    libusb20_dev_get_address(pdev) != addr)
 			continue;
 		if (libusb20_dev_open(pdev, 0))
-			err(EXIT_FAILURE, "could not open device");
+			err(EXIT_FAILURE, "libusb20_dev_open()");
 		ddesc = libusb20_dev_get_device_desc(pdev);
 		for (i = 0; i !=  ddesc->bNumConfigurations; i++) {
 			cfg = libusb20_dev_alloc_config(pdev, i);
@@ -2185,11 +2199,45 @@ is_mtp_dev(const char *ugen)
 			free(cfg);
 		}
 		if (libusb20_dev_close(pdev))
-                        err(EXIT_FAILURE, "could not close device");
+                        err(EXIT_FAILURE, "libusb20_dev_close()");
 	}
 	libusb20_be_free(pbe);
 
 	return (found);
+}
+
+static char *
+get_mtp_label(const char *ugen)
+{
+	int	    bus, addr;
+	bool	    found;
+	const  char *desc;
+	static char *p, buf[256];
+	struct libusb20_device	*pdev;
+	struct libusb20_backend	*pbe;
+
+	if (!get_ugen_bus_and_addr(ugen, &bus, &addr))
+		return (false);
+	pbe = libusb20_be_alloc_default();
+	for (found = false, pdev = NULL;
+	    !found && (pdev = libusb20_be_device_foreach(pbe, pdev));) {
+		if (libusb20_dev_get_bus_number(pdev) == bus &&
+		    libusb20_dev_get_address(pdev) == addr) {
+			found = true;
+			desc = libusb20_dev_get_desc(pdev);
+			if (desc != NULL && *desc != '\0') {
+				(void)strncpy(buf, desc, sizeof(buf) - 1);
+				(void)strtok(buf, ": <>");
+				 p = strtok(NULL, ": <>");
+				if (*p == '\0')
+					p = NULL;
+			} else
+				p = NULL;
+		}
+	}
+	libusb20_be_free(pbe);
+
+	return (!found ? NULL : p);
 }
 
 static char *
