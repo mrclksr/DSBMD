@@ -54,7 +54,7 @@ FILES USED
  code ERR_PERMISSION_DENIED (258), and terminates the connection.
 
     When a client WITH permission connects, DSBMD sends a list of zero or more
- drives using device add messages (2.5.1). The list is terminated by sending
+ devices using device add messages (2.5.1). The list is terminated by sending
  a ``=´´ on a line by itself.
 
  1.2 COMMANDS
@@ -99,18 +99,20 @@ FILES USED
 
  MESSAGE TYPE	MEANING
  ------------------------------------------------------------------------------
- +		A drive was added
- -		A drive was removed
- I		Information. The type information is defined by 'msgtype'
+ +		A device/media was added
+ -		A device/media was removed
+ M		A device/media was mounted
+ U		A device/media was unmounted
+ V		The reading speed of a CD/DVD was changed.
  W		A warning message.
- E		An error message.
+ E		Command failed.
  O		Command execution was successful.
+ S		Shutdown
 
  2.3 KEYWORDS AND VALUES
 
  KEYWORD		VALUE
  ------------------------------------------------------------------------------
- msgtype	mount, unmount, speed, eject, shutdown
  command	mount, unmount, speed, eject, size
  code		An errno number (< 257) or a special error code (>= 257)
  dev		Device name
@@ -120,7 +122,7 @@ FILES USED
  used		Number of used bytes of a media
  free		Number of free bytes of a media
  type		Drive/media type: HDD, AUDIOCD, DVD, VCD, USBHDD, SVCD, DATACD
- cmds		A comma (``,´´) separated list of supported drive commands.
+ cmds		A comma (``,´´) separated list of supported device commands.
  mntcmderr	Numerical return value of external mount command.
 
  2.4 ERROR CODES
@@ -142,6 +144,8 @@ FILES USED
  269		Unknown error
  270		Mount command failed
  271		Invalid Argument
+ 272		Command string too long
+ 273		Invalid command string
 
 
  2.5.0 DSBMD MESSAGES IN DETAIL
@@ -159,46 +163,60 @@ FILES USED
 
  E:code=<error code>[:command=<executed command>]
 
- 2.5.4 INFO MESSAGE FORMAT (I)
+ 2.5.4 BROADCAST MESSAGE FORMAT
 
  General format:
- I:msgtype=<message type>:[dev=<devname>:speed=<speed>|mntpt=<mounted on>]
 
- If the speed of a CDROM device was changed, the following message will be
- sent to all connected clients:
-	I:msgtype=speed:dev=<devname>:speed=<speed>
+ (M|U):dev=<devname>:mntpt=<mounted on>
+
+ V:dev=<devname>:speed=<speed>
+
+ S
+ 
+If the speed of a CDROM device was changed, the following message will be
+ sent to all connected clients, except for the client who sent the command.
+
+	V:dev=<devname>:speed=<speed>
 
  If a device was mounted, the following message will be sent to all connected
- clients:
-	I:msgtype=mount:dev=<devname>:mntpt=<mounted on>
+ clients, exept for the client who sent the command.
+
+	M:dev=<devname>:mntpt=<mounted on>
 
  If a device was unmounted, the following message will be sent to all connected
- clients:
-	I:msgtype=unmount:dev=<devname>:mntpt=<mounted on>
+ clients, except for the client who sent the command.
+
+	U:dev=<devname>:mntpt=<mounted on>
 
  If the daemon was terminated, it sends the following message to all connected
  clients:
-	I:msgtype=shutdown
+
+	S
 
  2.5.5 SUCCESS MESSAGE FORMAT (O)
 
  General format:
+
  O:command=<executed command>[:keyword=value] ...
 
  If a device was successfully mounted, DSBMD replies with the following message:
+
 	O:command=mount:dev=<devname>:mntpt=<mounted on>
 
  If a device was successfully unmounted, DSBMD replies with the following
  message:
+
 	O:command=unmount:dev=<devname>:mntpt=<mounted on>
 
  If the capacity of a disk device was requested, DSBMD sends the following
  message:
+
 	O:command=size:dev=<devname>:mediasize=<size in bytes>:used=<used bytes>:free=<free bytes>
 
 'used' and 'free' are 0 if the disk device is not mounted.
 
  For all other successfully executed commands, DSBMD sends the following
  message:
+
 	O:command=<executed command>
 
