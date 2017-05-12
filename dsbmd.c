@@ -528,7 +528,7 @@ static void
 cleanup(int unused)
 {
 	logprintx("%s exited", PROGRAM);
-	cliprintbc(NULL, "I:msgtype=shutdown");
+	cliprintbc(NULL, "S");
 	exit(EXIT_SUCCESS);
 }
 
@@ -738,8 +738,10 @@ process_devd_event(char *ev)
 	} else if (strcmp(devdevent.type, "DESTROY") == 0) {
 		(void)pthread_mutex_lock(&drv_mtx);
 		drvp = lookupdrv(devdevent.cdev);
-		if (drvp != NULL)
+		if (drvp != NULL) {
+			(void)pthread_mutex_lock(&drvp->mtx);
 			del_drive(drvp);
+		}
 		(void)pthread_mutex_unlock(&drv_mtx);
 	}
 }
@@ -850,8 +852,10 @@ media_changed()
 				logprint("Lost %s", pollqueue[i]->dev);
 				(void)pthread_mutex_lock(&drv_mtx);
 				drvp = lookupdrv(pollqueue[i]->dev);
-				if (drvp != NULL)
+				if (drvp != NULL) {
+					(void)pthread_mutex_lock(&drvp->mtx);
 					del_drive(drvp);
+				}
 				(void)pthread_mutex_unlock(&drv_mtx);
 				i = 0;
 				return (NULL);
@@ -1387,7 +1391,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 			drvp->mounted = true;
 			cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
 			    drvp->dev, drvp->mntpt);
-			cliprintbc(cli, "I:msgtype=mount:dev=%s:mntpt=%s",
+			cliprintbc(cli, "M:dev=%s:mntpt=%s",
 			    drvp->dev, drvp->mntpt);
 			logprintx("Device %s mounted on %s by UID %d",
 			    drvp->dev, drvp->mntpt, cli->uid);
@@ -1417,7 +1421,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 		drvp->mounted = true;
 		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
 		    drvp->dev, drvp->mntpt);
-		cliprintbc(cli, "I:msgtype=mount:dev=%s:mntpt=%s",
+		cliprintbc(cli, "M:dev=%s:mntpt=%s",
 		    drvp->dev, drvp->mntpt);
 		logprintx("Device %s mounted on %s by UID %d", drvp->dev,
 		    drvp->mntpt, cli->uid);
@@ -1443,6 +1447,12 @@ unmount_drive(client_t *cli, drive_t *drvp, bool force, bool eject)
 	if (drvp->dc->class != FUSE &&
 	    (!drvp->mounted && drvp->fs->mntcmd != NULL) &&
 	    getmntpt(drvp) == NULL) {
+		if (!eject) {
+			cliprint(cli, "E:command=unmount:code=%d",
+			    ERR_NOT_MOUNTED);
+		}
+		return (ERR_NOT_MOUNTED);
+	} else if (!drvp->mounted) {
 		if (!eject) {
 			cliprint(cli, "E:command=unmount:code=%d",
 			    ERR_NOT_MOUNTED);
@@ -1477,15 +1487,17 @@ unmount_drive(client_t *cli, drive_t *drvp, bool force, bool eject)
 	 * command, we send the client an info message informing them that the
 	 * device was unmounted.
 	 */
-	cliprintbc(eject ? NULL : cli, "I:msgtype=unmount:dev=%s:mntpt=%s",
+	cliprintbc(eject ? NULL : cli, "U:dev=%s:mntpt=%s",
 	    drvp->dev, drvp->mntpt);
 	logprintx("Device %s unmounted from %s by UID %d", drvp->dev,
 	    drvp->mntpt, cli->uid);
 	rmntpt(drvp->mntpt);
 	free(drvp->mntpt); drvp->mntpt = NULL;
 	drvp->mounted = false;
-	if (drvp->dc->class == FUSE)
-		del_drive(drvp);
+	if (drvp->dc->class == FUSE) {
+		if (pthread_mutex_lock(&drvp->mtx) == 0 || errno != EINVAL)
+			del_drive(drvp);
+	}
 	sleep(1);
 	return (0);
 }
@@ -2061,14 +2073,14 @@ add_drive(const char *dev)
 static void
 del_drive(drive_t *drvp)
 {
-	int i, j;
+	int		i, j;
+	pthread_mutex_t mtx;
 
 	for (i = 0; i < ndrives && drvp != drives[i]; i++)
 		;
 	if (i == ndrives)
 		return;
-	(void)pthread_mutex_lock(&drives[i]->mtx);
-	(void)pthread_mutex_destroy(&drives[i]->mtx);
+	mtx = drives[i]->mtx;
 
 	del_from_pollqueue(drives[i]);
 
@@ -2095,6 +2107,7 @@ del_drive(drive_t *drvp)
 	for (; i < ndrives - 1; i++)
 		drives[i] = drives[i + 1];
 	ndrives--;
+	(void)pthread_mutex_destroy(&mtx);
 }
 
 /*
@@ -2551,7 +2564,7 @@ set_cdrspeed(client_t *cli, drive_t *drvp, int speed)
 		error = 0;
 		drvp->speed = speed / 177;
 		cliprint(cli, "O:command=speed:speed=%d", drvp->speed);
-		cliprintbc(cli, "I:msgtype=speed:speed=%d:dev=%s",
+		cliprintbc(cli, "V:speed=%d:dev=%s",
 		    drvp->speed, drvp->dev);
 	}
 	(void)close(fd);
@@ -2650,6 +2663,7 @@ cliprint(client_t *cli, const char *fmt, ...)
 	va_start(ap, fmt);
 	(void)vfprintf(cli->s, fmt, ap);
 	(void)fputc('\n', cli->s);
+	(void)fflush(cli->s);
 	(void)pthread_mutex_unlock(&cli->mtx);
 	errno = saved_errno;
 }
@@ -2661,13 +2675,14 @@ cliprintbc(client_t *exclude, const char *fmt, ...)
 	va_list	ap;
 
 	saved_errno = errno;
-	va_start(ap, fmt);
 	for (i = 0; i < nclients; i++) {
 		if (exclude == clients[i])
 			continue;
 		(void)pthread_mutex_lock(&clients[i]->mtx);
+		va_start(ap, fmt);
 		(void)vfprintf(clients[i]->s, fmt, ap);
 		(void)fputc('\n', clients[i]->s);
+		(void)fflush(clients[i]->s);
 		(void)pthread_mutex_unlock(&clients[i]->mtx);
 	}
 	errno = saved_errno;
@@ -2911,6 +2926,7 @@ cmd_size(client_t *cli, char **argv)
 			cliprint(cli,
 			    "O:command=size:dev=%s:mediasize=0:free=0:used=0",
 			    drvp->dev);
+			(void)pthread_mutex_unlock(&drvp->mtx);
 			return;
 		}
 		if ((fd = open(drvp->dev, O_RDONLY | O_NONBLOCK)) == -1) {
@@ -2922,6 +2938,7 @@ cmd_size(client_t *cli, char **argv)
 		    "O:command=size:dev=%s:mediasize=%llu:free=0:used=0",
 		    drvp->dev, (uint64_t)g_mediasize(fd));
 		(void)close(fd);
+		(void)pthread_mutex_unlock(&drvp->mtx);
 	}
 	(void)pthread_mutex_unlock(&drvp->mtx);
 }
@@ -3045,16 +3062,19 @@ check_fuse_mount(struct statfs *sb, int nsb)
 		if (strncmp(q, "fuse", 4) == 0) {
 			for (found = false, j = 0; j < ndrives && !found; j++) {
 				dp = drives[j];
-				if (dp->mntpt == NULL)
+				if (pthread_mutex_trylock(&dp->mtx) != 0)
 					continue;
+				if (dp->mntpt == NULL) {
+					(void)pthread_mutex_unlock(&dp->mtx);
+					continue;
+				}
 				if (strcmp(dp->mntpt, sb[i].f_mntonname) == 0)
 					found = true;
+				(void)pthread_mutex_unlock(&dp->mtx);
 			}
 			if (!found) {
 				/* New FUSE device mounted. */
-				(void)pthread_mutex_lock(&drv_mtx);
 				add_fuse_device(sb[i].f_mntonname);
-				(void)pthread_mutex_unlock(&drv_mtx);
 				return;
 			}
 		}
@@ -3076,13 +3096,10 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 			if (strcmp(drives[i]->mntpt, sb[j].f_mntonname) == 0)
 				found = true;
 		}
-		if (!found) {
-			pthread_mutex_unlock(&drives[i]->mtx);
+		if (!found)
 			del_drive(drives[i]);
-			(void)pthread_mutex_unlock(&drv_mtx);
-			return;
-		}
-		pthread_mutex_unlock(&drives[i]->mtx);
+		else
+			pthread_mutex_unlock(&drives[i]->mtx);
 	}
 }
 
@@ -3136,20 +3153,20 @@ check_mntbl(struct statfs *sb, int nsb)
 					err(EXIT_FAILURE, "strdup()");
 				dp->mounted = true;
 				cliprintbc(NULL,
-				    "I:msgtype=mount:dev=%s:mntpt=%s",
+				    "M:dev=%s:mntpt=%s",
 				    dp->dev, dp->mntpt);
 			} else if (dp->mounted &&
 			    strcmp(dp->mntpt, mntpt) != 0) {
 				/* Remounted */
 				cliprintbc(NULL,
-				    "I:msgtype=unmount:dev=%s:mntpt=%s",
+				    "U:dev=%s:mntpt=%s",
 				    dp->dev, dp->mntpt);
 				free(dp->mntpt);
 				dp->mntpt = strdup(mntpt);
 				if (dp->mntpt == NULL)
 					err(EXIT_FAILURE, "strdup()");
 				cliprintbc(NULL,
- 				    "I:msgtype=mount:dev=%s:mntpt=%s",
+ 				    "M:dev=%s:mntpt=%s",
 				    dp->dev, dp->mntpt);
 			}
 		} else if (dp->mounted) {
@@ -3160,7 +3177,7 @@ check_mntbl(struct statfs *sb, int nsb)
 				}
 			}	
 			/* Unmounted */
-			cliprintbc(NULL, "I:msgtype=unmount:dev=%s:mntpt=%s",
+			cliprintbc(NULL, "U:dev=%s:mntpt=%s",
 			    dp->dev, dp->mntpt);
 			free(dp->mntpt);
 			dp->mntpt   = NULL;
