@@ -1386,6 +1386,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 			    "0, but the mount point %s could not be found " \
 			    "in the mount table", drvp->fs->mntcmd, cli->uid,
 			    mntpath);
+			free(mntpath);
 		} else if (is_mntpt(mntpath)) {
 			drvp->mntpt = mntpath;
 			drvp->mounted = true;
@@ -1402,10 +1403,12 @@ mount_drive(client_t *cli, drive_t *drvp)
 				logprint("Command %s executed by UID %d " \
 				    "failed with code %d", drvp->fs->mntcmd,
 				    cli->uid, error);
+				free(mntpath);
 			} else {
 				logprintx("Command %s executed by UID %d " \
                                     "failed with code %d", drvp->fs->mntcmd,
                                     cli->uid, error);
+				free(mntpath);
 			}
 		}
 		restoreids();
