@@ -121,7 +121,8 @@ FILES USED
  mediasize	Total capacity in bytes of a media
  used		Number of used bytes of a media
  free		Number of free bytes of a media
- type		Drive/media type: HDD, AUDIOCD, DVD, VCD, USBHDD, SVCD, DATACD
+ type		Drive/media type: HDD, AUDIOCD, DVD, VCD, USBDISK, SVCD,
+		DATACD, MMC, FLOPPY
  cmds		A comma (``,´´) separated list of supported device commands.
  mntcmderr	Numerical return value of external mount command.
 
@@ -173,7 +174,7 @@ FILES USED
 
  S
  
-If the speed of a CDROM device was changed, the following message will be
+ If the speed of a CDROM device was changed, the following message will be
  sent to all connected clients, except for the client who sent the command.
 
 	V:dev=<devname>:speed=<speed>
@@ -213,7 +214,7 @@ If the speed of a CDROM device was changed, the following message will be
 
 	O:command=size:dev=<devname>:mediasize=<size in bytes>:used=<used bytes>:free=<free bytes>
 
-'used' and 'free' are 0 if the disk device is not mounted.
+ 'used' and 'free' are 0 if the disk device is not mounted.
 
  For all other successfully executed commands, DSBMD sends the following
  message:
