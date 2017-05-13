@@ -3065,8 +3065,8 @@ check_fuse_mount(struct statfs *sb, int nsb)
 		if (strncmp(q, "fuse", 4) == 0) {
 			for (found = false, j = 0; j < ndrives && !found; j++) {
 				dp = drives[j];
-				if (pthread_mutex_trylock(&dp->mtx) != 0)
-					continue;
+				if (pthread_mutex_lock(&dp->mtx) != 0)
+					return;
 				if (dp->mntpt == NULL) {
 					(void)pthread_mutex_unlock(&dp->mtx);
 					continue;
@@ -3093,8 +3093,8 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 	for (i = 0; i < ndrives; i++) {
 		if (drives[i]->dc->class != FUSE)
 			continue;
-		if (pthread_mutex_trylock(&drives[i]->mtx) != 0)
-			continue;
+		if (pthread_mutex_lock(&drives[i]->mtx) != 0)
+			return;
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			if (strcmp(drives[i]->mntpt, sb[j].f_mntonname) == 0)
 				found = true;
@@ -3118,8 +3118,8 @@ check_mntbl(struct statfs *sb, int nsb)
 	for (i = 0; i < ndrives; i++) {
 		if (drives[i]->dc->class == FUSE)
 			continue;
-		if (pthread_mutex_trylock(&drives[i]->mtx) != 0)
-			continue;
+		if (pthread_mutex_lock(&drives[i]->mtx) != 0)
+			return;
 		dp = drives[i];
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			q = devbasename(sb[j].f_mntfromname);
