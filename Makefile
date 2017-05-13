@@ -12,6 +12,7 @@ DOCSDIR		    ?= ${PREFIX}/share/doc/${PROGRAM}
 DOCS		     = README
 SCRIPTDIR	     = ${PREFIX}/libexec/dsbmd-scripts
 SCRIPTS		     = scripts/mount_mtpfs.sh scripts/mount_ntfs.sh
+SCRIPTS		    += scripts/mount_exfat.sh
 SOURCES		     = ${PROGRAM}.c config.c dsbcfg/dsbcfg.c fs.c common.c
 PROGRAM_FLAGS	     = -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_LOG=\"${LOGFILE}\"
