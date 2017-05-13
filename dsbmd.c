@@ -197,7 +197,7 @@ struct command_s {
 	{ "speed",   &cmd_speed   }, { "size",	&cmd_size  }
 };
 
-const char *kmods[] = { "ufs", "msdosfs", "ext2fs", "fuse" };
+const char *kmods[] = { "ufs", "msdosfs", "ext2fs", "fuse", "geom_linux_lvm" };
 #define NKMODS (sizeof(kmods) / sizeof(char *))
 
 static int	nclients = 0;		/* # of connected clients. */
