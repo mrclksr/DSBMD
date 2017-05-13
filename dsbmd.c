@@ -197,6 +197,9 @@ struct command_s {
 	{ "speed",   &cmd_speed   }, { "size",	&cmd_size  }
 };
 
+const char *kmods[] = { "ufs", "msdosfs", "ext2fs", "fuse" };
+#define NKMODS (sizeof(kmods) / sizeof(char *))
+
 static int	nclients = 0;		/* # of connected clients. */
 static int	ndrives  = 0;		/* # of drives. */
 static int	queuesz  = 0;		/* # of devices in poll queue. */
@@ -466,6 +469,14 @@ main(int argc, char *argv[])
 	maxfd = fileno(s) > ls ? fileno(s) : ls;
 	FD_ZERO(&allset);
 	FD_SET(ls, &allset); FD_SET(fileno(s), &allset);
+
+	/* Load filesystem modules */
+	for (i = 0; i < NKMODS; i++) {
+		if (modfind(kmods[i]) == -1 && errno == ENOENT) {
+			if (kldload(kmods[i]) == -1 && errno != EEXIST)
+				logprint("kldload(%s)", kmods[i]);
+		}
+	}
 
 	/* Start thread that checks the mount table for changes. */
 	if (pthread_create(&thr, NULL, thr_check_mntbl, NULL) == 0)
