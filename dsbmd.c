@@ -3016,6 +3016,7 @@ cmd_unmount(client_t *cli, char **argv)
 	int	i;
 	bool	force;
 	drive_t *drvp;
+	pthread_mutex_t mtx;
 
 	force = false;
 	for (i = 0; argv[i] != NULL && argv[i][0] == '-'; i++) {
@@ -3037,10 +3038,16 @@ cmd_unmount(client_t *cli, char **argv)
 		(void)pthread_mutex_unlock(&drv_mtx);
 		return;
 	}
-	(void)pthread_mutex_lock(&drvp->mtx);
-	(void)pthread_mutex_unlock(&drv_mtx);
+	/*
+	 * Save mutex. If we unmount a fuse device, unmount_drive() will
+	 * delete the device at drvp, so drvp might be invalid after that.
+	 */
+	mtx = drvp->mtx;
+
+	(void)pthread_mutex_lock(&mtx);
 	(void)unmount_drive(cli, drvp, force, false);
-	(void)pthread_mutex_unlock(&drvp->mtx);
+	(void)pthread_mutex_unlock(&mtx);
+	(void)pthread_mutex_unlock(&drv_mtx);
 }
 
 static void
