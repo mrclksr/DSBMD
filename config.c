@@ -36,6 +36,7 @@ dsbcfg_vardef_t vardefs[] = {
 	{ "reiserfs_mount_cmd", DSBCFG_VAR_STRING,  CFG_REISERFS_MNTCMD  },
 	{ "xfs_mount_cmd",      DSBCFG_VAR_STRING,  CFG_XFS_MNTCMD	 },
 	{ "mtpfs_mount_cmd",    DSBCFG_VAR_STRING,  CFG_MTPFS_MNTCMD	 },
+	{ "ptpfs_mount_cmd",    DSBCFG_VAR_STRING,  CFG_PTPFS_MNTCMD	 },
 	{ "cd9660_opts",        DSBCFG_VAR_STRING,  CFG_CD9660_OPTS	 },
 	{ "msdosfs_opts",       DSBCFG_VAR_STRING,  CFG_MSDOSFS_OPTS	 },
 	{ "msdosfs_locale",     DSBCFG_VAR_STRING,  CFG_MSDOSFS_LOCALE	 },

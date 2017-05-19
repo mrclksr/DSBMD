@@ -1,9 +1,9 @@
 				ABOUT DSBMD
 
-	DSBMD is a media/filesystem type detecting daemon that allows clients
-to mount storage devices.
+DSBMD is a media/filesystem type detecting daemon for FreeBSD that allows
+clients to mount storage devices. It is configured to work out of the box.
 
-	DSBMD watches the mount table for changes, monitors devd events for new
+DSBMD watches the mount table for changes, monitors devd events for new
 storage devices, polls CD/DVD drives and card readers for media change events,
 determines media types, volume names, and filesystem types. Mountable devices,
 changes in the mount table as well as device add/remove events and altered
@@ -36,12 +36,30 @@ Some features are:
 
 - Support for MTP devices
 
+- Support for PTP devices
+
 FILES USED
 
  UNIX domain socket:	/var/run/dsbmd.socket
  Configuration file:	/usr/local/etc/dsbmd.conf
  Logfile:		/var/log/dsbmd.log
 
+
+				INSTALLATION
+
+# make install
+
+				   SETUP
+
+In order to start DSBMD at boot time, add the following line to your /etc/rc.conf:
+
+dsbmd_enable="YES"
+
+Depending on your needs, install the FreeBSD ports fusefs-exfat, fusefs-gphotofs,
+fusefs-ntfs, and fusefs-simple-mtpfs. DSBMD comes with predefined commands in
+dsbmd.conf that use these ports to mount the corresponding filesystems.
+
+For further configuration, see dsbmd.conf.
 
 
 			DSBMD PROTOCOL SPECIFICATION
@@ -121,8 +139,8 @@ FILES USED
  mediasize	Total capacity in bytes of a media
  used		Number of used bytes of a media
  free		Number of free bytes of a media
- type		Drive/media type: HDD, AUDIOCD, DVD, VCD, USBDISK, SVCD,
-		DATACD, MMC, FLOPPY
+ type		Device/media type: HDD, AUDIOCD, DVD, VCD, USBDISK, SVCD,
+		DATACD, MMC, MTP, PTP
  cmds		A comma (``,´´) separated list of supported device commands.
  mntcmderr	Numerical return value of external mount command.
 

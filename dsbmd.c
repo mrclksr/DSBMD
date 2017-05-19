@@ -49,11 +49,13 @@
 #include <sys/param.h>
 #include <sys/linker.h>
 #include <sys/module.h>
+#include <time.h>
 #include <unistd.h>
 #include <vm/vm_param.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <regex.h>
 #include <paths.h>
 #include <fstab.h>
 #include <pwd.h>
@@ -76,82 +78,87 @@
 #include "config.h"
 #include <sys/iconv.h>
 
-#define MAXDEVS		64
-#define MNTDIRPERM	(S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
-#define NCOMMANDS	(sizeof(commands) / sizeof(struct command_s))
-#define NDISK_TYPES	(sizeof(disktypes) / sizeof(disktypes[0]))
-#define NDISK_CLASSES	(sizeof(disk_classes) / sizeof(disk_classes[0]))
-#define MNTCHK_INTERVAL	1000000
+#define MAXDEVS		   64
+#define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
+#define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
+#define NDISK_TYPES	   (sizeof(disktypes) / sizeof(disktypes[0]))
+#define NDISK_CLASSES	   (sizeof(disk_classes) / sizeof(disk_classes[0]))
+#define MNTCHK_INTERVAL	   1000000
 
-static int		get_cdrtype(const char *);
-static int		mymount(const char *, const char *, const char *,
-			    const char *, uid_t, gid_t);
-static int		mount_drive(client_t *, drive_t *drvp);
-static int		unmount_drive(client_t *, drive_t *, bool, bool);
-static int		extend_iovec(struct iovec **, int *, const char *,
-			    const char *);
-static int		eject_media(client_t *, drive_t *, bool);
-static int		set_cdrspeed(client_t *, drive_t *, int);
-static int		set_msdosfs_locale(const char *, struct iovec**, int *);
-static int		waitforbytes(FILE *);
-static bool		match_part_dev(const char *, size_t);
-static bool		has_media(const char *);
-static bool		is_parted(const char *);
-static bool		is_atapicam(const char *);
-static bool		is_mountable(const char *);
-static bool		is_mntpt(const char *);
-static bool		is_mtp_dev(const char *);
-static bool		check_permission(uid_t, gid_t *);
-static bool		get_ugen_bus_and_addr(const char *, int *, int *);
-static bool		usermount_set(void);
-static FILE		*uconnect(const char *);
-static char		*read_devd_event(FILE *);
-static char		**extend_list(char **, int *, const char *);
-static char		*getmntpt(drive_t *);
-static char		*get_cam_modelname(const char *);
-static char		*get_ata_modelname(const char *);
-static char		*get_diskname(const char *);
-static char		*get_lv_dev(const char *);
-static char		*get_mtp_label(const char *);
-static char		*dev_from_gptid(const char *);
-static void		process_devd_event(char *);
-static void		process_connreq(int);
-static void		usage(void);
-static void		switcheids(uid_t, gid_t);
-static void		restoreids(void);
-static void		rmntpt(const char *);
-static void		cleanup(int);
-static void		del_drive(drive_t *);
-static void		*serve_client(void *);
-static void		del_client(client_t *);
-static void		update_drive(drive_t *);
-static void		parse_devd_event(char *);
-static void		free_iovec(struct iovec *);
-static void		add_to_pollqueue(drive_t *);
-static void		del_from_pollqueue(drive_t *);
-static void		exec_cmd(client_t *, char *);
-static void		cmd_eject(client_t *, char **);
-static void		cmd_speed(client_t *, char **);
-static void		cmd_size(client_t *, char **);
-static void		cmd_mount(client_t *, char **);
-static void		cmd_unmount(client_t *, char **);
-static void		cmd_quit(client_t *cli, char **);
-static void		notifybc(drive_t *, bool);
-static void		notify(client_t *, drive_t *, bool);
-static void		cliprint(client_t *, const char *, ...);
-static void		cliprintbc(client_t *, const char *, ...);
-static void		check_mntbl(struct statfs *sb, int nsb);
-static void		check_fuse_mount(struct statfs *sb, int nsb);
-static void		check_fuse_unmount(struct statfs *, int);
-static void		*thr_check_mntbl(void *);
-static drive_t		*add_drive(const char *);
-static drive_t		*add_mtp_device(const char *);
-static drive_t		*media_changed(void);
-static drive_t		*lookupdrv(const char *);
-static client_t		*add_client(int);
-static const dskcl_t	*match_disk_pattern(const char *);
-static const dsktp_t	*get_disktype(const char *, const dskcl_t *);
+#define USB_CLASS_UMASS	   0x08
+#define USB_SUBCLASS_UMASS 0x06
+#define USB_SUBCLASS_MMC   0x02
+#define USB_CLASS_PTP	   0x06
+#define USB_SUBCLASS_PTP   0x01
+#define USB_PROTOCOL_PTP   0x01
 
+static int	get_ugen_type(const char *);
+static int	get_optical_disk_type(const char *);
+static int	get_da_storage_type(const char *);
+static int	mymount(const char *, const char *, const char *,
+		    const char *, uid_t, gid_t);
+static int	mount_device(client_t *, sdev_t *devp);
+static int	unmount_device(client_t *, sdev_t *, bool, bool);
+static int	extend_iovec(struct iovec **, int *, const char *,
+		    const char *);
+static int	eject_media(client_t *, sdev_t *, bool);
+static int	set_cdrspeed(client_t *, sdev_t *, int);
+static int	set_msdosfs_locale(const char *, struct iovec**, int *);
+static int	waitforbytes(FILE *);
+static bool	match_part_dev(const char *, size_t);
+static bool	has_media(const char *);
+static bool	is_parted(const char *);
+static bool	is_mountable(const char *);
+static bool	is_mntpt(const char *);
+static bool	check_permission(uid_t, gid_t *);
+static bool	usermount_set(void);
+static FILE	*uconnect(const char *);
+static char	*read_devd_event(FILE *);
+static char	**extend_list(char **, int *, const char *);
+static char	*getmntpt(sdev_t *);
+static char	*get_cam_modelname(const char *);
+static char	*get_diskname(const char *);
+static char	*get_lvm_dev(const char *);
+static char	*dev_from_gptid(const char *);
+static char	*ugen_to_gphoto_port(const char *);
+static void	process_devd_event(char *);
+static void	process_connreq(int);
+static void	usage(void);
+static void	switcheids(uid_t, gid_t);
+static void	restoreids(void);
+static void	rmntpt(const char *);
+static void	cleanup(int);
+static void	del_device(sdev_t *);
+static void	*serve_client(void *);
+static void	del_client(client_t *);
+static void	update_device(sdev_t *);
+static void	parse_devd_event(char *);
+static void	free_iovec(struct iovec *);
+static void	add_to_pollqueue(sdev_t *);
+static void	del_from_pollqueue(sdev_t *);
+static void	exec_cmd(client_t *, char *);
+static void	cmd_eject(client_t *, char **);
+static void	cmd_speed(client_t *, char **);
+static void	cmd_size(client_t *, char **);
+static void	cmd_mount(client_t *, char **);
+static void	cmd_unmount(client_t *, char **);
+static void	cmd_quit(client_t *cli, char **);
+static void	notifybc(sdev_t *, bool);
+static void	notify(client_t *, sdev_t *, bool);
+static void	cliprint(client_t *, const char *, ...);
+static void	cliprintbc(client_t *, const char *, ...);
+static void	check_mntbl(struct statfs *sb, int nsb);
+static void	check_fuse_mount(struct statfs *sb, int nsb);
+static void	check_fuse_unmount(struct statfs *, int);
+static void	*thr_check_mntbl(void *);
+static time_t	do_poll(void);
+static sdev_t	*add_device(const char *);
+static sdev_t	*add_ptp_device(const char *);
+static sdev_t	*add_mtp_device(const char *);
+static sdev_t	*media_changed(void);
+static sdev_t	*lookup_dev(const char *);
+static client_t	*add_client(int);
+static const storage_type_t *get_storage_type(const char *);
 
 /*
  * Struct to represent the fields of a devd notify event.
@@ -165,24 +172,29 @@ struct devdevent_s {
 
 static const char *glblprfx[NGLBLPRFX] = GLBLPRFX;
 
-const dsktp_t disktypes[] = {
-	{ DSK_TYPE_HDD,	    "HDD"	 }, { DSK_TYPE_MMC,	"MMC"	    }, 
-	{ CDR_TYPE_RAW,     "RAWCD"	 }, { CDR_TYPE_VCD,	"VCD"	    },
-	{ CDR_TYPE_SVCD,    "SVCD"	 }, { CDR_TYPE_DVD,	"DVD"	    },
-	{ CDR_TYPE_AUDIO,   "AUDIOCD"	 }, { CDR_TYPE_DATA,	"DATACD"    },
-	{ DSK_TYPE_FLOPPY,  "FLOPPY"	 }, { CDR_TYPE_UNKNOWN, "UNKNOWNCD" },
-	{ DSK_TYPE_USBDISK, "USBDISK"    }, { DSK_TYPE_FUSE, 	"HDD"	    },
-	{ DSK_TYPE_MTP,	    "USBDISK"	 }
+const storage_type_t storage_types[] = {
+	{ "HDD",	ST_HDD       },
+	{ "MMC",	ST_MMC       }, 
+	{ "VCD",	ST_VCD       },
+	{ "SVCD",	ST_SVCD      },
+	{ "DVD",	ST_DVD       },
+	{ "AUDIOCD",	ST_CDDA	     },
+	{ "DATACD",	ST_DATACD    },
+	{ "USBDISK",	ST_USBDISK   },
+	{ "MTP",	ST_MTP	     },
+	{ "PTP",	ST_PTP	     },
+	{ "HDD",	ST_FUSE	     }
 };
 
-const dskcl_t disk_classes[] = {
-	{ ATA,	 MSD,    "ad"	      }, { ATA,   CDROM, "acd"	      },
-	{ ATA,	 FLOPPY, "afd"	      }, { CAM,   MSD,   "da"	      },
-	{ CAM,   CDROM,  "cd"	      }, { CAM,   MSD,   "ada"	      },
-	{ MMC,   MSD,    "mmcsd"      }, { OTHER, MD,    "md"	      },
-	{ OTHER, FUSE,	 ""           }, { OTHER, LLV,   "linux_lvm/" },
-	{ CAM,   LLV,	 "linux_lvm/" }, { ATA,	  LLV,	 "linux_lvm/" },
-	{ USB,	 MTP,	 "ugen"	      }
+const iface_t interfaces[] = {
+	{ RE_CD,	IF_TYPE_CD   },
+	{ RE_ADA,	IF_TYPE_ADA  },
+	{ RE_DA,	IF_TYPE_DA   },
+	{ RE_UGEN,	IF_TYPE_UGEN },
+	{ RE_LVM,	IF_TYPE_LVM  },
+	{ RE_MMC,	IF_TYPE_MMC  },
+	{ RE_MD,	IF_TYPE_MD   },
+	{ RE_FUSE,	IF_TYPE_FUSE }
 };
 
 /*
@@ -192,25 +204,28 @@ struct command_s {
 	const char *cmd;
 	void (*cmdf)(client_t *, char **);
 } commands[] = {
-	{ "quit",    &cmd_quit	  }, { "mount", &cmd_mount },
-	{ "unmount", &cmd_unmount }, { "eject", &cmd_eject },
-	{ "speed",   &cmd_speed   }, { "size",	&cmd_size  }
+	{ "quit",	&cmd_quit    },
+	{ "mount",	&cmd_mount   },
+	{ "unmount",	&cmd_unmount },
+	{ "eject",	&cmd_eject   },
+	{ "speed",	&cmd_speed   },
+	{ "size",	&cmd_size    }
 };
 
 const char *kmods[] = { "ufs", "msdosfs", "ext2fs", "fuse", "geom_linux_lvm" };
 #define NKMODS (sizeof(kmods) / sizeof(char *))
 
 static int	nclients = 0;		/* # of connected clients. */
-static int	ndrives  = 0;		/* # of drives. */
+static int	ndevs  = 0;		/* # of devs. */
 static int	queuesz  = 0;		/* # of devices in poll queue. */
 static uid_t    *allow_uids = NULL;	/* UIDs allowed to connect. */
 static gid_t    *allow_gids = NULL;	/* GIDs allowed to connect. */
-static drive_t	**pollqueue = NULL;	/* List of devices to poll. */
-static drive_t	**drives    = NULL;	/* List of mountable drives. */
+static sdev_t	**pollqueue = NULL;	/* List of devices to poll. */
+static sdev_t	**devs      = NULL;	/* List of mountable devs. */
 static client_t **clients   = NULL;	/* List of connected clients. */
 static dsbcfg_t *cfg	    = NULL;
 static pthread_mutex_t cli_mtx;		/* Mutex for client list mods. */
-static pthread_mutex_t drv_mtx;		/* Mutex for drive list mods. */
+static pthread_mutex_t dev_mtx;		/* Mutex for device list mods. */
 
 int
 main(int argc, char *argv[])
@@ -220,8 +235,8 @@ main(int argc, char *argv[])
 	bool	       fflag;
 	FILE	       *s, *fp;
 	char	       lvmpath[512], *ev, **v;
+	time_t	       polltime;
 	fd_set	       allset, rset;
-	drive_t	       *drvp;
 	pthread_t      thr;
 	struct stat    sb;
 	struct group   *gr;
@@ -354,6 +369,10 @@ main(int argc, char *argv[])
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_MTPFS_MNTCMD).string;
 			break;
+		case PTPFS:
+			fstype[i].mntcmd = dsbcfg_getval(cfg,
+			    CFG_PTPFS_MNTCMD).string;
+			break;
 		default:
 			/* Just to soothe clang. */
 			break;
@@ -406,12 +425,15 @@ main(int argc, char *argv[])
 	if ((dirp = opendir(".")) == NULL)
 		err(EXIT_FAILURE, "opendir(%s)", _PATH_DEV);
 	while ((dp = readdir(dirp)) != NULL) {
+		if (strcmp(dp->d_name, ".")  == 0 ||
+		    strcmp(dp->d_name, "..") == 0)
+			continue;
 		if (lstat(dp->d_name, &sb) == -1) {
 			logprint("stat(%s)", dp->d_name);
 			continue;
 		}
 		if (strncmp(dp->d_name, "ugen", 4) == 0)
-			add_drive(dp->d_name);
+			add_device(dp->d_name);
 		else if (S_ISLNK(sb.st_mode)) { 
 			/* Skip symlinks */
 			continue;
@@ -427,11 +449,11 @@ main(int argc, char *argv[])
 					continue;
 				(void)snprintf(lvmpath, sizeof(lvmpath),
 				    "%s/%s", dp->d_name, dp2->d_name);
-				add_drive(lvmpath);
+				add_device(lvmpath);
 			}
 			(void)closedir(dirp2);
 		} else
-			add_drive(dp->d_name);
+			add_device(dp->d_name);
 	}
 
 	(void)closedir(dirp);
@@ -440,7 +462,7 @@ main(int argc, char *argv[])
 	/* Connect to devd. */
 	if ((s = uconnect(PATH_DEVD_SOCKET)) == NULL)
 		err(EXIT_FAILURE, "Couldn't connect to %s", PATH_DEVD_SOCKET);
-	(void)pthread_mutex_init(&drv_mtx, NULL);
+	(void)pthread_mutex_init(&dev_mtx, NULL);
 	(void)pthread_mutex_init(&cli_mtx, NULL);
 
 	/* Open the listening socket for the clients. */
@@ -477,16 +499,17 @@ main(int argc, char *argv[])
 				logprint("kldload(%s)", kmods[i]);
 		}
 	}
-
 	/* Start thread that checks the mount table for changes. */
 	if (pthread_create(&thr, NULL, thr_check_mntbl, NULL) == 0)
 		(void)pthread_detach(thr);
 
 	/* Main loop. */
-	for (;;) {
+	for (polltime = 0;;) {
 		rset = allset;
 		tv.tv_sec = spoll; tv.tv_usec = upoll;
 
+		if (difftime(time(NULL), polltime) >= spoll)
+			polltime = do_poll();
 		switch (select(maxfd + 1, &rset, NULL, NULL, &tv)) {
 		case -1:
 			if (errno == EINTR)
@@ -494,9 +517,7 @@ main(int argc, char *argv[])
 			err(EXIT_FAILURE, "select()");
 			/* NOTREACHED */
 		case 0:
-			/* Timeout -> Poll devices. */
-			while ((drvp = media_changed()) != NULL)
-				update_drive(drvp);
+			polltime = do_poll();
 			if (s == NULL) {
 				/* Try to reconnect to devd */
 				if ((s = uconnect(PATH_DEVD_SOCKET)) != NULL) {
@@ -543,15 +564,16 @@ cleanup(int unused)
 	exit(EXIT_SUCCESS);
 }
 
-static drive_t *
-lookupdrv(const char *dev)
+
+static sdev_t *
+lookup_dev(const char *dev)
 {
 	int i;
 
 	dev = devbasename(dev);
-	for (i = 0; i < ndrives; i++) {
-		if (strcmp(dev, devbasename(drives[i]->dev)) == 0)
-			return (drives[i]);
+	for (i = 0; i < ndevs; i++) {
+		if (strcmp(dev, devbasename(devs[i]->dev)) == 0)
+			return (devs[i]);
 	}
 	return (NULL);
 }
@@ -611,28 +633,27 @@ add_client(int socket)
 	(void)pthread_mutex_init(&cp->mtx, NULL);
 
 	/* 
-	 * Send the client the current list of mountable drives. Since we
-	 * want  to  send  the up to date drive information, we must lock
+	 * Send the client the current list of mountable devs. Since we
+	 * want  to  send  the up to date device information, we must lock
 	 * all devices until we are done.
 	 */
-	(void)pthread_mutex_lock(&drv_mtx);
-	for (n = 0; n < ndrives; n++) {
-		if (!drives[n]->has_media || drives[n]->fs == NULL)
-			continue;
-		notify(cp, drives[n], true);
+	(void)pthread_mutex_lock(&dev_mtx);
+	for (n = 0; n < ndevs; n++) {
+		if (devs[n]->visible)
+			notify(cp, devs[n], true);
 	}
-	/* Terminate drive list output. */
+	/* Terminate device list output. */
 	cliprint(cp, "=");
 
 	/*
 	 * Increasing  the  nclients  variable  must happen within the lock,
 	 * because  the  other  clients  don't know that this client exists.
-	 * If another client modifies a drive and sends a broadcast message,
+	 * If another client modifies a device and sends a broadcast message,
 	 * this  client  won't receive it and hence, its information is out-
 	 * dated.
 	 */
 	nclients++;
-	(void)pthread_mutex_unlock(&drv_mtx);
+	(void)pthread_mutex_unlock(&dev_mtx);
 	logprintx("Client with UID %d connected", uid);
 
 	return (cp);
@@ -734,7 +755,7 @@ read_devd_event(FILE *fp)
 static void
 process_devd_event(char *ev)
 {
-	drive_t *drvp;
+	sdev_t *devp;
 
 	if (ev[0] != '!')
 		return;
@@ -743,17 +764,23 @@ process_devd_event(char *ev)
 	    strcmp(devdevent.subsystem, "CDEV") != 0)
 		return;
 	if (strcmp(devdevent.type, "CREATE") == 0) {
-		(void)pthread_mutex_lock(&drv_mtx);
-		add_drive(devdevent.cdev);
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_lock(&dev_mtx);
+		add_device(devdevent.cdev);
+		(void)pthread_mutex_unlock(&dev_mtx);
 	} else if (strcmp(devdevent.type, "DESTROY") == 0) {
-		(void)pthread_mutex_lock(&drv_mtx);
-		drvp = lookupdrv(devdevent.cdev);
-		if (drvp != NULL) {
-			(void)pthread_mutex_lock(&drvp->mtx);
-			del_drive(drvp);
+		(void)pthread_mutex_lock(&dev_mtx);
+		devp = lookup_dev(devdevent.cdev);
+		if (devp != NULL) {
+			/*
+			 * Do not delete cd or mmcsd devices.
+			 */
+			if (devp->iface->type != IF_TYPE_CD &&
+			    devp->iface->type != IF_TYPE_MMC) {
+				(void)pthread_mutex_lock(&devp->mtx);
+				del_device(devp);
+			}
 		}
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 	}
 }
 
@@ -781,7 +808,7 @@ parse_devd_event(char *str)
 }
 
 static void
-add_to_pollqueue(drive_t *drv)
+add_to_pollqueue(sdev_t *drv)
 {
 	int   i, len;
 	char *p;
@@ -802,7 +829,7 @@ add_to_pollqueue(drive_t *drv)
 			return;
 	}
 	if ((pollqueue = realloc(pollqueue,
-	    sizeof(drive_t *) * (queuesz + 1))) == NULL)
+	    sizeof(sdev_t *) * (queuesz + 1))) == NULL)
 		err(EXIT_FAILURE, "realloc()");
 	pollqueue[queuesz] = drv;
 	pollqueue[queuesz]->has_media = has_media(drv->dev);
@@ -810,11 +837,11 @@ add_to_pollqueue(drive_t *drv)
 }
 
 static void
-del_from_pollqueue(drive_t *drvp)
+del_from_pollqueue(sdev_t *devp)
 {
 	int i;
 
-	for (i = 0; i < queuesz &&  drvp != pollqueue[i]; i++)
+	for (i = 0; i < queuesz &&  devp != pollqueue[i]; i++)
 		;
 	if (i == queuesz)
 		return;
@@ -841,86 +868,126 @@ has_media(const char *dev)
 	return (true);
 }
 
+static time_t
+do_poll()
+{
+	sdev_t *devp;
+
+	while ((devp = media_changed()) != NULL) {
+		(void)pthread_mutex_lock(&dev_mtx);
+		update_device(devp);
+		(void)pthread_mutex_unlock(&dev_mtx);
+	}
+	return (time(NULL));
+}
+
 /*
- * Return a pointer to the next drive whose media changed.
+ * Return a pointer to the next device whose media changed.
  */
-static drive_t *
+static sdev_t *
 media_changed()
 {
-	drive_t	   *drvp;
-	static int i = 0;
+	static int i = 0, error;
 
 	for (i = i >= queuesz ? 0 : i; i < queuesz; i++) {
+		if ((error = pthread_mutex_trylock(&pollqueue[i]->mtx)) != 0) {
+			i++;
+			return (NULL);
+		}
 		if (has_media(pollqueue[i]->dev)) {
 			if (!pollqueue[i]->has_media) {
 				/* Media was inserted */
 				pollqueue[i]->has_media = true;
+				pthread_mutex_unlock(&pollqueue[i]->mtx);
 				return (pollqueue[i++]);
 			}
-		} else { /* No media */
-			if (errno == ENOENT) {
-				/* Lost device */
-				logprint("Lost %s", pollqueue[i]->dev);
-				(void)pthread_mutex_lock(&drv_mtx);
-				drvp = lookupdrv(pollqueue[i]->dev);
-				if (drvp != NULL) {
-					(void)pthread_mutex_lock(&drvp->mtx);
-					del_drive(drvp);
-				}
-				(void)pthread_mutex_unlock(&drv_mtx);
-				i = 0;
-				return (NULL);
-			}
-			if (pollqueue[i]->has_media) {
-				/* Media was removed */
-				pollqueue[i]->has_media = false;
-				return (pollqueue[i++]);
-			}
+		} else if (pollqueue[i]->has_media) {
+			/* Media was removed */
+			pollqueue[i]->has_media = false;
+			pthread_mutex_unlock(&pollqueue[i]->mtx);
+			return (pollqueue[i++]);
 		}
+		pthread_mutex_unlock(&pollqueue[i]->mtx);
 	}
 	return (NULL);
 }
 
 static void
-update_drive(drive_t *drvp)
+update_device(sdev_t *devp)
 {
 	char *p;
 
-	if (drvp->has_media) {
-		(void)pthread_mutex_lock(&drvp->mtx);
-		drvp->dt = get_disktype(drvp->dev, drvp->dc);
-		drvp->fs = getfs(drvp->dev);
-
-		if (drvp->dt->dt_type == CDR_TYPE_DATA	 ||
-		    drvp->dt->dt_type == DSK_TYPE_FLOPPY ||
-		    drvp->dc->class == MSD) {
-			if (drvp->fs == NULL) {
-				/*
-				 * A filesystem is mandatory for the above
-				 * disk types.
-				 */
-				(void)pthread_mutex_unlock(&drvp->mtx);
+	if (devp->has_media) {
+		/* Media inserted. */
+		if (pthread_mutex_lock(&devp->mtx) != 0)
+			return;
+		free(devp->name); devp->name = NULL;
+		if (devp->iface->type == IF_TYPE_CD) {
+			devp->st = get_storage_type(devp->dev);
+			if (devp->st == NULL) {
+				(void)pthread_mutex_unlock(&devp->mtx);
 				return;
 			}
-		}
-		free(drvp->name); drvp->name = NULL;
-		if (drvp->fs != NULL) {
-			p = get_label(drvp->dev, drvp->fs->name);
-			if (p != NULL) {
-				if ((drvp->name = strdup(p)) == NULL)
-					err(EXIT_FAILURE, "strdup()");
-			} else {
-				drvp->name = strdup(devbasename(drvp->dev));
-				if (drvp->name == NULL)
-					err(EXIT_FAILURE, "strdup()");
+			switch (devp->st->type) {
+			case ST_CDDA:
+			case ST_SVCD:
+			case ST_VCD:
+				devp->visible = true;
+				notifybc(devp, true);
+				(void)pthread_mutex_unlock(&devp->mtx);
+				return;
+			case ST_DATACD:
+			case ST_DVD:
+				devp->fs = getfs(devp->dev);
+				if (devp->fs == NULL) {
+					(void)pthread_mutex_unlock(&devp->mtx);
+					return;
+				}
+				break;
+			default:
+				break;
 			}
+		} else if ((devp->fs = getfs(devp->dev)) == NULL) {
+			(void)pthread_mutex_unlock(&devp->mtx);
+			return;
 		}
-		if (drvp->dt->dt_type != CDR_TYPE_UNKNOWN)
-			notifybc(drvp, true);
-		(void)pthread_mutex_unlock(&drvp->mtx);
-	} else if (drvp->fs != NULL || (drvp->dc->class == CDROM &&
-	     drvp->dt->dt_type != CDR_TYPE_UNKNOWN))
-		notifybc(drvp, false);
+		if ((p = get_label(devp->dev, devp->fs->name)) != NULL) {
+			if ((devp->name = strdup(p)) == NULL)
+				err(EXIT_FAILURE, "strdup()");
+		} else if ((devp->name = strdup(devbasename(devp->dev))) == NULL)
+			err(EXIT_FAILURE, "strdup()");
+		devp->visible = true;
+		notifybc(devp, true);
+		(void)pthread_mutex_unlock(&devp->mtx);
+	} else {
+		/* Media removed. */
+		if (pthread_mutex_lock(&devp->mtx) != 0)
+			return;
+		devp->visible = false;
+
+		if (devp->fs != NULL) { 
+			notifybc(devp, false);
+			devp->fs = NULL;
+			(void)pthread_mutex_unlock(&devp->mtx);
+		} else {
+			if (devp->st == NULL) {
+				(void)pthread_mutex_unlock(&devp->mtx);
+				return;
+			}
+			switch (devp->st->type) {
+			case ST_CDDA:
+			case ST_SVCD:
+			case ST_VCD:
+				notifybc(devp, false);
+				(void)pthread_mutex_unlock(&devp->mtx);
+				return;
+			default:
+				(void)pthread_mutex_unlock(&devp->mtx);
+				return;
+			}
+
+		}
+	}
 }
 
 /*
@@ -991,7 +1058,7 @@ is_parted(const char *dev)
 }
 
 /*
- * We consider a drive not mountable if it appears in /etc/fstab without
+ * We consider a device not mountable if it appears in /etc/fstab without
  * the 'noauto' option, or if it's a swap device.
  */
 static bool
@@ -1226,8 +1293,9 @@ check_permission(uid_t uid, gid_t *gids)
 	return (false);
 }
 
+
 static int
-mount_drive(client_t *cli, drive_t *drvp)
+mount_device(client_t *cli, sdev_t *devp)
 {
 	int	    error = 0, i, j, len;
 	bool	    have_mntpt = false;
@@ -1236,19 +1304,19 @@ mount_drive(client_t *cli, drive_t *drvp)
 	const char  *op;
 	struct stat sb;
 
-	if (!drvp->has_media) {
+	if (!devp->has_media) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_NO_MEDIA);
 		return (ERR_NO_MEDIA);
 	}
-	if (drvp->fs == NULL) {
+	if (devp->fs == NULL) {
 		cliprint(cli, "E:command=mount:code=%d",
 		    ERR_UNKNOWN_FILESYSTEM);
 		return (ERR_UNKNOWN_FILESYSTEM);
 	}
-	if (drvp->fs->uopts != NULL)
-		op = drvp->fs->uopts;
+	if (devp->fs->uopts != NULL)
+		op = devp->fs->uopts;
 	else
-		op = drvp->fs->dopts;
+		op = devp->fs->dopts;
 	/* Resolve field codes. */
 	len = sizeof(mopts) - 1;
 	for (i = 0; i < len && op != NULL && *op != '\0'; op++) {
@@ -1284,8 +1352,8 @@ mount_drive(client_t *cli, drive_t *drvp)
 		(void)strncat(romopts, ",ro", sizeof(romopts) - (q - p) - 1);
 	}
 
-	/* Check if the drive is already mounted. */
-	if ((drvp->mounted && drvp->fs->mntcmd) || getmntpt(drvp) != NULL) {
+	/* Check if the device is already mounted. */
+	if ((devp->mounted && devp->fs->mntcmd) || getmntpt(devp) != NULL) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_ALREADY_MOUNTED);
 		return (ERR_ALREADY_MOUNTED);
 	}
@@ -1299,14 +1367,14 @@ mount_drive(client_t *cli, drive_t *drvp)
 			    dsbcfg_getval(cfg, CFG_MNTDIR).string);
 	}
 	mntpath = malloc(strlen(dsbcfg_getval(cfg, CFG_MNTDIR).string) +
-	    strlen(drvp->name) + 2);
+	    strlen(devp->name) + 2);
 	if (mntpath == NULL)
 		err(EXIT_FAILURE, "malloc()");
 	/* Skip directory part in case of Linux LV */
-	if ((p = strchr(drvp->name, '/')) != NULL)
+	if ((p = strchr(devp->name, '/')) != NULL)
 		p++;
 	else
-		p = drvp->name;
+		p = devp->name;
 	(void)sprintf(mntpath, "%s/%s", dsbcfg_getval(cfg, CFG_MNTDIR).string,
 	    p);
 
@@ -1329,7 +1397,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 			free(mntpath);
 			if ((mntpath = malloc(MNAMELEN)) == NULL)
 				err(EXIT_FAILURE, "malloc()");
-			if (strcmp(devbasename(drvp->dev), drvp->name) != 0) {
+			if (strcmp(devbasename(devp->dev), devp->name) != 0) {
 				/*
 				 * If  the  device's  devname is != its vol ID
 				 * try   to   create   a   mount   path   with
@@ -1338,7 +1406,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 				 */
 				(void)snprintf(mntpath, MNAMELEN, "%s/%s",
 				    dsbcfg_getval(cfg, CFG_MNTDIR).string,
-				    devbasename(drvp->dev));
+				    devbasename(devp->dev));
 				if (mkdir(mntpath, mode) == -1) {
 					if (errno != EEXIST)
 						err(EXIT_FAILURE, "mkdir(%s)",
@@ -1355,7 +1423,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 				 */
 				(void)snprintf(mntpath, MNAMELEN, "%s/%s.XXXX",
 				    dsbcfg_getval(cfg, CFG_MNTDIR).string,
-				    devbasename(drvp->dev));
+				    devbasename(devp->dev));
 				if (mkdtemp(mntpath) == NULL) {
 					err(EXIT_FAILURE, "mkdtemp(%s)",
 					    mntpath);
@@ -1371,7 +1439,7 @@ mount_drive(client_t *cli, drive_t *drvp)
 		err(EXIT_FAILURE, "chown(%s)", mntpath);
 	errno = 0;
 
-	if (drvp->fs->mntcmd != NULL) {
+	if (devp->fs->mntcmd != NULL) {
 		/*
 		 * Execute the userdefined mount command.
 		 */
@@ -1384,42 +1452,45 @@ mount_drive(client_t *cli, drive_t *drvp)
 		(void)setenv(ENV_UID, num, 1);
 		(void)snprintf(num, sizeof(num), "%u", cli->gids[0]);
 		(void)setenv(ENV_GID, num, 1);
-		(void)setenv(ENV_DEV, drvp->dev, 1);
-		(void)setenv(ENV_LABEL, drvp->name, 1);
-		(void)setenv(ENV_FILESYSTEM, drvp->fs->name, 1);
+		(void)setenv(ENV_DEV, devp->dev, 1);
+		(void)setenv(ENV_LABEL, devp->name, 1);
+		(void)setenv(ENV_FILESYSTEM, devp->fs->name, 1);
 		(void)setenv(ENV_MNTPT, mntpath, 1);
-
-		if ((error = system(drvp->fs->mntcmd)) == 0 &&
+		if (devp->iface->type == IF_TYPE_UGEN) {
+			(void)setenv(ENV_USB_PORT,
+			    ugen_to_gphoto_port(devbasename(devp->dev)), 1);		
+		}
+		if ((error = system(devp->fs->mntcmd)) == 0 &&
 		    !is_mntpt(mntpath)) {
 			cliprint(cli, "E:command=mount:code=%d",
 			    ERR_UNKNOWN_ERROR);
 			logprintx("Command '%s' executed by UID %d returned " \
 			    "0, but the mount point %s could not be found " \
-			    "in the mount table", drvp->fs->mntcmd, cli->uid,
+			    "in the mount table", devp->fs->mntcmd, cli->uid,
 			    mntpath);
 			rmntpt(mntpath);
 			free(mntpath);
 		} else if (is_mntpt(mntpath)) {
-			drvp->mntpt = mntpath;
-			drvp->mounted = true;
+			devp->mntpt = mntpath;
+			devp->mounted = true;
 			cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
-			    drvp->dev, drvp->mntpt);
+			    devp->dev, devp->mntpt);
 			cliprintbc(cli, "M:dev=%s:mntpt=%s",
-			    drvp->dev, drvp->mntpt);
+			    devp->dev, devp->mntpt);
 			logprintx("Device %s mounted on %s by UID %d",
-			    drvp->dev, drvp->mntpt, cli->uid);
+			    devp->dev, devp->mntpt, cli->uid);
 		} else {
 			cliprint(cli, "E:command=mount:code=%d:mntcmderr=%d",
 			    ERR_MNTCMD_FAILED, error);
 			if (errno != 0) {
 				logprint("Command %s executed by UID %d " \
-				    "failed with code %d", drvp->fs->mntcmd,
+				    "failed with code %d", devp->fs->mntcmd,
 				    cli->uid, error);
 				rmntpt(mntpath);
 				free(mntpath);
 			} else {
 				logprintx("Command %s executed by UID %d " \
-                                    "failed with code %d", drvp->fs->mntcmd,
+                                    "failed with code %d", devp->fs->mntcmd,
                                     cli->uid, error);
 				rmntpt(mntpath);
 				free(mntpath);
@@ -1428,24 +1499,24 @@ mount_drive(client_t *cli, drive_t *drvp)
 		restoreids();
 		return (error);
 	}
-	if (!mymount(drvp->fs->name, mntpath, drvp->dev, mopts, cli->uid,
+	if (!mymount(devp->fs->name, mntpath, devp->dev, mopts, cli->uid,
 	    cli->gids[0]) ||
-	    !mymount(drvp->fs->name, mntpath, drvp->dev, romopts, cli->uid,
+	    !mymount(devp->fs->name, mntpath, devp->dev, romopts, cli->uid,
 	    cli->gids[0])) {
 		free(mntpath);
-		if (getmntpt(drvp) == NULL)
+		if (getmntpt(devp) == NULL)
 			err(EXIT_FAILURE, "getmntpt()");
-		drvp->mounted = true;
+		devp->mounted = true;
 		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
-		    drvp->dev, drvp->mntpt);
+		    devp->dev, devp->mntpt);
 		cliprintbc(cli, "M:dev=%s:mntpt=%s",
-		    drvp->dev, drvp->mntpt);
-		logprintx("Device %s mounted on %s by UID %d", drvp->dev,
-		    drvp->mntpt, cli->uid);
+		    devp->dev, devp->mntpt);
+		logprintx("Device %s mounted on %s by UID %d", devp->dev,
+		    devp->mntpt, cli->uid);
 		return (0);
 	}
 	cliprint(cli, "E:command=mount:code=%d", errno);
-	logprint("Mounting of %s by UID %d failed", drvp->dev, cli->uid);
+	logprint("Mounting of %s by UID %d failed", devp->dev, cli->uid);
 
 	rmntpt(mntpath);
 	free(mntpath);
@@ -1454,32 +1525,32 @@ mount_drive(client_t *cli, drive_t *drvp)
 }
 
 /*
- * Unmounts a drive. If 'force'  is  true, unmounting of the drive will be
- * enforced,  even  if  the  drive is busy. If 'eject' is true, no command
+ * Unmounts a device. If 'force'  is  true, unmounting of the device will be
+ * enforced,  even  if  the  device is busy. If 'eject' is true, no command
  * reply  code  will  be send to the client. This is used for eject_media()
  * to prevent dsbmd  from sending two reply codes (one for unmount, and one
  * for eject) to the client.
  */
 static int
-unmount_drive(client_t *cli, drive_t *drvp, bool force, bool eject)
+unmount_device(client_t *cli, sdev_t *devp, bool force, bool eject)
 {
 
-	if (drvp->dc->class != FUSE &&
-	    (!drvp->mounted && drvp->fs->mntcmd != NULL) &&
-	    getmntpt(drvp) == NULL) {
+	if (devp->iface->type != IF_TYPE_FUSE &&
+	    (!devp->mounted && devp->fs->mntcmd != NULL) &&
+	    getmntpt(devp) == NULL) {
 		if (!eject) {
 			cliprint(cli, "E:command=unmount:code=%d",
 			    ERR_NOT_MOUNTED);
 		}
 		return (ERR_NOT_MOUNTED);
-	} else if (!drvp->mounted) {
+	} else if (!devp->mounted) {
 		if (!eject) {
 			cliprint(cli, "E:command=unmount:code=%d",
 			    ERR_NOT_MOUNTED);
 		}
 		return (ERR_NOT_MOUNTED);
 	}
-	if (unmount(drvp->mntpt, force ? MNT_FORCE : 0) == -1) {
+	if (unmount(devp->mntpt, force ? MNT_FORCE : 0) == -1) {
 		if (errno == EINVAL) {
 			/* Not mounted. */
 			if (!eject) {
@@ -1491,13 +1562,13 @@ unmount_drive(client_t *cli, drive_t *drvp, bool force, bool eject)
 		if (!eject)
 			cliprint(cli, "E:command=unmount:code=%d", errno);
 		logprint("Unmounting of %s mounted on %s by UID %d " \
-		    "failed", drvp->dev, drvp->mntpt, cli->uid);
+		    "failed", devp->dev, devp->mntpt, cli->uid);
 		return (errno);
 	}
 	/* Unmounting was successfull. */
 	if (!eject) {
-		cliprint(cli, "O:command=unmount:dev=%s:mntpt=%s", drvp->dev,
-		    drvp->mntpt);
+		cliprint(cli, "O:command=unmount:dev=%s:mntpt=%s", devp->dev,
+		    devp->mntpt);
 	}
 	/*
 	 * If a device is mounted and the client sent an eject command, it
@@ -1508,25 +1579,25 @@ unmount_drive(client_t *cli, drive_t *drvp, bool force, bool eject)
 	 * device was unmounted.
 	 */
 	cliprintbc(eject ? NULL : cli, "U:dev=%s:mntpt=%s",
-	    drvp->dev, drvp->mntpt);
-	logprintx("Device %s unmounted from %s by UID %d", drvp->dev,
-	    drvp->mntpt, cli->uid);
-	rmntpt(drvp->mntpt);
-	free(drvp->mntpt); drvp->mntpt = NULL;
-	drvp->mounted = false;
-	if (drvp->dc->class == FUSE) {
-		if (pthread_mutex_lock(&drvp->mtx) == 0 || errno != EINVAL)
-			del_drive(drvp);
+	    devp->dev, devp->mntpt);
+	logprintx("Device %s unmounted from %s by UID %d", devp->dev,
+	    devp->mntpt, cli->uid);
+	rmntpt(devp->mntpt);
+	free(devp->mntpt); devp->mntpt = NULL;
+	devp->mounted = false;
+	if (devp->iface->type == IF_TYPE_FUSE) {
+		if (pthread_mutex_lock(&devp->mtx) == 0 || errno != EINVAL)
+			del_device(devp);
 	}
 	sleep(1);
 	return (0);
 }
 
 /*
- * Looks up the given drive's mount point in the mount table.
+ * Looks up the given device's mount point in the mount table.
  */
 static char *
-getmntpt(drive_t *drvp)
+getmntpt(sdev_t *devp)
 {
 	int	      i, j, n;
 	const char    *p, *q, *g;
@@ -1535,36 +1606,36 @@ getmntpt(drive_t *drvp)
 	errno = 0;
 	if ((n = getmntinfo(&mb, MNT_WAIT)) == -1)
 		err(EXIT_FAILURE, "getmntinfo()");
-	p = devbasename(drvp->dev);
+	p = devbasename(devp->dev);
 	for (i = 0; i < n; i++) {
 		q = devbasename(mb[i].f_mntfromname);
 		if (strcmp(p, q) == 0) {
-			/* The drive was mounted using its device name. */
-			if (drvp->mntpt != NULL &&
-			    strcmp(drvp->mntpt, mb[i].f_mntonname) == 0)
-				return (drvp->mntpt);
-			free(drvp->mntpt);
-			if ((drvp->mntpt = strdup(mb[i].f_mntonname)) == NULL)
+			/* The device was mounted using its device name. */
+			if (devp->mntpt != NULL &&
+			    strcmp(devp->mntpt, mb[i].f_mntonname) == 0)
+				return (devp->mntpt);
+			free(devp->mntpt);
+			if ((devp->mntpt = strdup(mb[i].f_mntonname)) == NULL)
 				err(EXIT_FAILURE, "strdup()");
-			return (drvp->mntpt);
+			return (devp->mntpt);
 		}
-		/* Check if the drive was mounted using its glabel. */
-		for (j = 0; j < NGLBLPRFX && drvp->glabel[j] != NULL; j++) {
+		/* Check if the device was mounted using its glabel. */
+		for (j = 0; j < NGLBLPRFX && devp->glabel[j] != NULL; j++) {
 			/* Skip the glabel-prefix (ufs/, cd9660/, etc.). */
-			if ((g = strchr(drvp->glabel[j], '/')) != NULL)
+			if ((g = strchr(devp->glabel[j], '/')) != NULL)
 				g++;
 			else
-				g = drvp->glabel[j];
-			if (strcmp(drvp->glabel[j], q) == 0 ||
+				g = devp->glabel[j];
+			if (strcmp(devp->glabel[j], q) == 0 ||
 			    strcmp(g, q) == 0) {
-				if (drvp->mntpt != NULL &&
-				    strcmp(drvp->mntpt, mb[i].f_mntonname) == 0)
-					return (drvp->mntpt);
-				free(drvp->mntpt);
-				if ((drvp->mntpt =
+				if (devp->mntpt != NULL &&
+				    strcmp(devp->mntpt, mb[i].f_mntonname) == 0)
+					return (devp->mntpt);
+				free(devp->mntpt);
+				if ((devp->mntpt =
 				    strdup(mb[i].f_mntonname)) == NULL)
 					err(EXIT_FAILURE, "strdup()");
-				return (drvp->mntpt);
+				return (devp->mntpt);
 			}
 		}
 	}
@@ -1640,8 +1711,8 @@ extend_list(char **list, int *size, const char *str)
 static char *
 get_diskname(const char *path)
 {
-	static char   *p, *name = NULL;
-	static size_t  len = 0;
+	static char  *p, *name = NULL;
+	static size_t len = 0;
 
 	if (len < strlen(path)) {
 		len = strlen(path) + 10;
@@ -1660,26 +1731,26 @@ get_diskname(const char *path)
  * Determines the CDROM/DVD type of a given CD/DVD device.
  */
 static int
-get_cdrtype(const char *path)
+get_optical_disk_type(const char *path)
 {
-	int	fd, lbs, seqnum, dirtblpos, dirtblsz, type, reclen;
-	int	i, len, sector, offset, saved_errno, namelen, pbs;
-	char	*buf, *p;
-	bool	has_video_ts, has_mpeg2, has_mpegav, has_svcd, has_vcd;
-	off_t	msz;
+	int    fd, lbs, seqnum, dirtblpos, dirtblsz, type, reclen;
+	int    i, len, sector, offset, saved_errno, namelen, pbs;
+	char   *buf, *p;
+	bool   has_video_ts, has_mpeg2, has_mpegav, has_svcd, has_vcd;
+	off_t  msz;
 	struct ioc_toc_header tochdr;
         struct iso_directory_record *dp;
 	struct iso_primary_descriptor *ip;
 	struct ioc_read_toc_single_entry tocent;
 
 	if (!has_media(path))
-		return (CDR_TYPE_UNKNOWN);
-	buf = NULL; type = CDR_TYPE_UNKNOWN;
+		return (-1);
+	buf = NULL; type = ST_UNKNOWN;
 	if ((fd = open(path, O_RDONLY)) == -1) {
 		logprint("open()");
 		goto error;
 	}
-	/* Check whether the drive has a valid media. */
+	/* Check whether the device has a valid media. */
 	if (ioctl(fd, DIOCGMEDIASIZE, &msz) == -1 || msz <= 0) {
 		logprint("mediasize");
 		goto done;
@@ -1707,10 +1778,10 @@ get_cdrtype(const char *path)
 	 * not set, it is probably an audio CD.
 	 */
 	if (!(tocent.entry.control & (1 << 2))) {
-		type = CDR_TYPE_AUDIO;
+		type = ST_CDDA;
 		goto done;
 	} else
-		type = CDR_TYPE_RAW;
+		type = ST_UNKNOWN;
 	sector = (ISO_DEFAULT_BLOCK_SIZE * 16) / pbs;
 	offset = (ISO_DEFAULT_BLOCK_SIZE * 16) % pbs;
 	if (lseek(fd, sector * pbs, SEEK_SET) == -1)
@@ -1724,7 +1795,7 @@ get_cdrtype(const char *path)
 	if (strncmp(ip->id, ISO_STANDARD_ID, sizeof(ISO_STANDARD_ID) - 1))
 		/* No ISO9660 filesystem */
 		goto done;
-	type = CDR_TYPE_DATA;
+	type = ST_DATACD;
 	dp = (struct iso_directory_record *)ip->root_directory_record;
 
 	lbs	  = isonum_723((u_char *)ip->logical_block_size);
@@ -1741,7 +1812,7 @@ get_cdrtype(const char *path)
 	p   = buf + offset;
 	len = pbs - offset;
 	has_video_ts = has_mpeg2 = has_mpegav = has_svcd = has_vcd = false;
-	while (type == CDR_TYPE_DATA && dirtblsz > 0) {
+	while (type == ST_DATACD && dirtblsz > 0) {
 		if (len <= ISO_DIRECTORY_RECORD_SIZE + 31) {
 			for (i = 0; i < len; i++)
 				buf[i] = *p++;
@@ -1770,11 +1841,11 @@ get_cdrtype(const char *path)
 				has_mpeg2 = true;
 		}
 		if (has_video_ts)
-			type = CDR_TYPE_DVD;
+			type = ST_DVD;
 		else if (has_mpeg2 && has_svcd)
-			type = CDR_TYPE_SVCD;
+			type = ST_SVCD;
 		else if (has_mpegav && has_vcd)
-			type = CDR_TYPE_VCD;
+			type = ST_VCD;
 		p	 += reclen;
 		len	 -= reclen;
 		dirtblsz -= reclen;
@@ -1790,416 +1861,505 @@ error:	saved_errno = errno;
 	return (-1);
 }
 
-/*
- * Looks up the disktype object in the disktypes table and returns a
- * pointer to it.
- */
-static const dsktp_t *
-lookup_disktype(int type)
+const storage_type_t *
+st_from_type(uint8_t type)
 {
 	int i;
 
-	for (i = 0; i < sizeof(disktypes) / sizeof(dsktp_t); i++) {
-		if (type == disktypes[i].dt_type)
-			return (&disktypes[i]);
+	for (i = 0; i < sizeof(storage_types) / sizeof(storage_type_t); i++) {
+		if (storage_types[i].type == type)
+			return (&storage_types[i]);
 	}
 	return (NULL);
 }
 
-/*
- * Determines the type (hard drive, audio CD, SVCD, etc.) of a drive.
- */
-static const dsktp_t *
-get_disktype(const char *dev, const dskcl_t *dc)
+const iface_t *
+iface_from_type(uint8_t type)
 {
-	int  type;
-	char *disk;
-	struct cam_device *cd;
+	int i;
 
-	if (dc->class == CDROM) {
-		if ((type = get_cdrtype(dev)) == -1) {
-			logprint("get_cdrtype()");
-			return (lookup_disktype(CDR_TYPE_UNKNOWN));
-		}
-		return (lookup_disktype(type));
-	} else if (dc->class == FLOPPY)
-		return (lookup_disktype(DSK_TYPE_FLOPPY));
-	else if (dc->class == MMC)
-		return (lookup_disktype(DSK_TYPE_MMC));
-	else if (dc->system == CAM) {
-		disk = get_diskname(dev);
-		if ((cd = cam_open_device(disk, O_RDWR)) != NULL) {
-			if (strncmp(cd->sim_name, "umass", 5) == 0) {
-				cam_close_device(cd);
-				return (lookup_disktype(DSK_TYPE_USBDISK));
-			}
-			cam_close_device(cd);
-		} else
-			logprint("cam_open_device(%s): %s", disk, cam_errbuf);
+	for (i = 0; i < sizeof(interfaces) / sizeof(iface_t); i++) {
+		if (interfaces[i].type == type)
+			return (&interfaces[i]);
 	}
-	return (lookup_disktype(DSK_TYPE_HDD));
+	return (NULL);
 }
 
-static drive_t *
-add_mtp_device(const char *ugen)
+const iface_t *
+iface_from_name(const char *name)
+{
+	int	i;
+	regex_t preg;
+
+	for (i = 0; i < sizeof(interfaces) / sizeof(iface_t); i++) {
+	        if (interfaces[i].re == NULL)
+			continue;
+		if (regcomp(&preg, interfaces[i].re, REG_EXTENDED))
+               		logprintx("regcomp(%s) failed", interfaces[i].re);
+		else if (regexec(&preg, name, 0, 0, 0) == 0)
+			return (&interfaces[i]);
+	}
+        return (NULL);
+}
+
+static const storage_type_t *
+get_storage_type(const char *devname)
+{
+	int   type;
+	char  *realdev;
+	const iface_t *iface;
+	const char *base;
+
+	base = devbasename(devname);
+	iface = iface_from_name(base);
+
+	if (iface == NULL)
+		return NULL;
+	switch (iface->type) {
+	case IF_TYPE_CD:
+		if (has_media(devname)) {
+			if ((type = get_optical_disk_type(devname)) == -1)
+				return (NULL);
+			if (type == ST_UNKNOWN)
+				return (NULL);
+			return (st_from_type(type));
+		}
+		return (NULL);
+	case IF_TYPE_LVM:
+		realdev = get_lvm_dev(base);
+		return (get_storage_type(realdev));
+	case IF_TYPE_DA:
+		if ((type = get_da_storage_type(devname)) == -1)
+			return (NULL);
+		return (st_from_type(type));
+	case IF_TYPE_UGEN:
+		if ((type = get_ugen_type(base)) == -1)
+			return (NULL);
+		if (type == ST_MTP || type == ST_PTP)
+			return (st_from_type(type));
+		return (NULL);
+	default:
+		return (st_from_type(ST_HDD));
+	}
+	return (NULL);
+}
+
+static int
+get_da_storage_type(const char *devname)
+{
+	int    u, type;
+	char   var[sizeof("dev.umass.##.%location") + 1], buf[512], *disk, *p;
+	size_t sz;
+	struct cam_device *cd;
+
+ 	disk = get_diskname(devname);
+	if ((cd = cam_open_device(disk, O_RDWR)) == NULL) {
+		logprint("cam_open_device(%s): %s", disk, cam_errbuf);
+		return (-1);
+	}
+	if (strncmp(cd->sim_name, "umass-sim", 9) != 0) {
+		cam_close_device(cd);
+		return (ST_HDD);
+	}
+	u = strtol(cd->sim_name + 9, NULL, 10);
+	cam_close_device(cd);
+
+	(void)snprintf(var, sizeof(var) - 1, "dev.umass.%d.%%location", u);
+
+	sz = sizeof(buf) - 1;
+	if (sysctlbyname(var, buf, &sz, NULL, 0) == -1) {
+		logprint("sysctlbyname(%s)", var);
+		return (-1);
+	}
+	for (p = buf; (p = strtok(p, "\t ")) != NULL; p = NULL) {
+		if (strncmp(p, "ugen=", 5) == 0)
+			break;
+	}
+	if (p == NULL)
+		return (-1);
+	p += 5;
+	if ((type = get_ugen_type(p)) == -1)
+		return (-1);
+	return (type);
+}
+
+static sdev_t *
+add_ptp_device(const char *ugen)
 {
 	int	   i, len;
-	drive_t	   **drvp;
+	sdev_t	   *devp;
 	const char *dev;
 
 	dev = devbasename(ugen);
 	/* Check if we already have this device. */
 	len = strlen(dev);
-	for (i = 0; i < ndrives; i++) {
-		if (strcmp(dev, drives[i]->dev + sizeof(_PATH_DEV) - 1) == 0) {
+	for (i = 0; i < ndevs; i++) {
+		if (strcmp(dev, devs[i]->dev + sizeof(_PATH_DEV) - 1) == 0) {
 			/* Device already exists. */
 			return (NULL);
 		}
 	}
-	drvp = realloc(drives, sizeof(drive_t *) * (ndrives + 1));
-	if (drvp == NULL)
-		err(EXIT_FAILURE, "realloc()");
-	drives = drvp;
-	if ((drives[ndrives] = malloc(sizeof(drive_t))) == NULL)
+	if ((devp = malloc(sizeof(sdev_t))) == NULL)
 		err(EXIT_FAILURE, "malloc()");
-	if ((drives[ndrives]->dev = strdup(devpath(dev))) == NULL)
+	if ((devp->dev = strdup(devpath(dev))) == NULL)
 		err(EXIT_FAILURE, "strdup()");
-	if ((drives[ndrives]->name = get_mtp_label(dev)) != NULL) {
-		drives[ndrives]->name = strdup(drives[ndrives]->name);
-		if (drives[ndrives]->name == NULL)
+	for (i = 0; i < NFSTYPES && fstype[i].id != PTPFS; i++)
+		;
+	devp->fs = &fstype[i];
+	if ((devp->name = get_label(dev, devp->fs->name)) != NULL) {
+		devp->name = strdup(devp->name);
+		if (devp->name == NULL)
 			err(EXIT_FAILURE, "strdup()");
-	} else if ((drives[ndrives]->name = strdup(dev)) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+	} else {
+		devp->name = malloc(sizeof("Camera ()") + strlen(dev) + 1);
+		if (devp->name == NULL)
+			err(EXIT_FAILURE, "malloc()");
+		(void)sprintf(devp->name, "Camera (%s)", dev);
+	}
+	devp->st	= st_from_type(ST_PTP);
+	devp->iface	= iface_from_name(dev);
+	devp->glabel[0] = NULL;
+	devp->mounted   = false;
+	devp->has_media = true;
+	devp->polling   = false;
+	devp->ejectable	= false;
+	devp->visible	= true;
+	devp->mntpt	= NULL;
+	(void)pthread_mutex_init(&devp->mtx, NULL);
 
-	for (i = 0; i < NDISK_CLASSES && disk_classes[i].class != MTP; i++)
-		;
-	drives[ndrives]->dc	   = &disk_classes[i];
-	for (i = 0; i < NFSTYPES && fstype[i].id != MTPFS; i++)
-		;
-	drives[ndrives]->fs	   = &fstype[i];
-	for (i = 0;
-	    i < NDISK_TYPES && disktypes[i].dt_type != DSK_TYPE_MTP; i++)
-		;
-	drives[ndrives]->dt	   = &disktypes[i];
-	drives[ndrives]->glabel[0] = NULL;
-	drives[ndrives]->mounted   = false;
-	drives[ndrives]->has_media = true;
-	drives[ndrives]->polling   = false;
-	drives[ndrives]->mntpt	   = NULL;
-	(void)pthread_mutex_init(&drives[ndrives]->mtx, NULL);
-	notifybc(drives[ndrives], true);
+	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
+	if (devs == NULL)
+		err(EXIT_FAILURE, "realloc()");
+	devs[ndevs++] = devp;
+	notifybc(devp, true);
 
-	return (drives[ndrives++]);
+	return (devp);
+
+	return (NULL);
 }
 
-static drive_t *
+static sdev_t *
+add_mtp_device(const char *ugen)
+{
+	int	   i, len;
+	sdev_t	   *devp;
+	const char *dev;
+	
+	dev = devbasename(ugen);
+	/* Check if we already have this device. */
+	len = strlen(dev);
+	for (i = 0; i < ndevs; i++) {
+		if (strcmp(dev, devs[i]->dev + sizeof(_PATH_DEV) - 1) == 0) {
+			/* Device already exists. */
+			return (NULL);
+		}
+	}
+	if ((devp = malloc(sizeof(sdev_t))) == NULL)
+		err(EXIT_FAILURE, "malloc()");
+	if ((devp->dev = strdup(devpath(dev))) == NULL)
+		err(EXIT_FAILURE, "strdup()");
+
+	for (i = 0; i < NFSTYPES && fstype[i].id != MTPFS; i++)
+		;
+	devp->fs = &fstype[i];
+	if ((devp->name = get_label(dev, devp->fs->name)) != NULL) {
+		devp->name = strdup(devp->name);
+		if (devp->name == NULL)
+			err(EXIT_FAILURE, "strdup()");
+	} else {
+		devp->name = malloc(sizeof("Camera ()") + strlen(dev) + 1);
+		if (devp->name == NULL)
+			err(EXIT_FAILURE, "malloc()");
+		(void)sprintf(devp->name, "MTP device (%s)", dev);
+	}
+	devp->st	= st_from_type(ST_MTP);
+	devp->iface	= iface_from_name(dev);
+	devp->glabel[0] = NULL;
+	devp->mounted   = false;
+	devp->has_media = true;
+	devp->polling   = false;
+	devp->ejectable	= false;
+	devp->visible	= true;
+	devp->mntpt	= NULL;
+	(void)pthread_mutex_init(&devp->mtx, NULL);
+
+	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
+	if (devs == NULL)
+		err(EXIT_FAILURE, "realloc()");
+	devs[ndevs++] = devp;
+	notifybc(devp, true);
+
+	return (devp);
+}
+
+static sdev_t *
 add_fuse_device(const char *mntpt)
 {
 	int	   i;
-	drive_t	   **drvp;
+	sdev_t	   *devp;
 	const char *p;
 	static int id = 0;
 
-	drvp = realloc(drives, sizeof(drive_t *) * (ndrives + 1));
-	if (drvp == NULL)
-		err(EXIT_FAILURE, "realloc()");
-	drives = drvp;
-	if ((drives[ndrives] = malloc(sizeof(drive_t))) == NULL)
+	if ((devp = malloc(sizeof(sdev_t))) == NULL)
 		err(EXIT_FAILURE, "malloc()");
 	/* Generate a fictive device name */
-	if ((drives[ndrives]->dev = strdup("/dev/pseudo##")) == NULL)
+	if ((devp->dev = strdup("/dev/pseudo##")) == NULL)
 		err(EXIT_FAILURE, "strdup()");
-	(void)sprintf(drives[ndrives]->dev, "/dev/pseudo%02d", id++);
+	(void)sprintf(devp->dev, "/dev/pseudo%02d", id++);
 	/* Use the last part of mount point path for the name */
 	for (p = strchr(mntpt, '\0'); *p != '/' && p != mntpt; p--)
 		;
 	if (*p == '/')
 		p++;
-	if ((drives[ndrives]->name = strdup(p)) == NULL)
+	if ((devp->name = strdup(p)) == NULL)
 		err(EXIT_FAILURE, "strdup()");
-	for (i = 0; i < NDISK_CLASSES && disk_classes[i].class != FUSE; i++)
-		;
-	drives[ndrives]->dc	   = &disk_classes[i];
 	for (i = 0; i < NFSTYPES && fstype[i].id != FUSEFS; i++)
 		;
-	drives[ndrives]->fs	   = &fstype[i];
-	for (i = 0;
-	    i < NDISK_TYPES && disktypes[i].dt_type != DSK_TYPE_FUSE; i++)
-		;
-	drives[ndrives]->dt	   = &disktypes[i];
-	drives[ndrives]->glabel[0] = NULL;
-	drives[ndrives]->mounted   = true;
-	drives[ndrives]->has_media = true;
-	drives[ndrives]->polling   = false;
-	drives[ndrives]->mntpt	   = strdup(mntpt);
-	if (drives[ndrives]->mntpt == NULL)
+	devp->st	= st_from_type(ST_FUSE);
+	devp->fs	= &fstype[i];
+	devp->iface	= iface_from_type(IF_TYPE_FUSE);
+	devp->glabel[0]	= NULL;
+	devp->mounted	= true;
+	devp->has_media	= true;
+	devp->polling	= false;
+	devp->visible	= true;
+	devp->ejectable	= false;
+	devp->mntpt	= strdup(mntpt);
+	if (devp->mntpt == NULL)
 		err(EXIT_FAILURE, "strdup()");
-	(void)pthread_mutex_init(&drives[ndrives]->mtx, NULL);
-	notifybc(drives[ndrives], true);
-	return (drives[ndrives++]);
+	(void)pthread_mutex_init(&devp->mtx, NULL);
 
+	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
+	if (devs == NULL)
+		err(EXIT_FAILURE, "realloc()");
+	devs[ndevs++] = devp;
+	notifybc(devp, true);
+
+	return (devp);
 }
 
-static drive_t *
-add_drive(const char *dev)
+static sdev_t *
+add_device(const char *devname)
 {
 	int	   len, i, j, speed, fd;
-	char	   **v, *path;
-	drive_t	   **drvp, drv = { 0 };
+	char	   **v, *path, *realdev;
+	sdev_t	   *devp, dev = { 0 };
 	const char *p;
 
-	dev = devbasename(dev);
+	devname = devbasename(devname);
+
 	/* Check if we already have this device. */
-	len = strlen(dev);
-	for (i = 0; i < ndrives; i++) {
-		if (strcmp(dev, drives[i]->dev + sizeof(_PATH_DEV) - 1) == 0) {
+	len = strlen(devname);
+	for (i = 0; i < ndevs; i++) {
+		if (!strcmp(devname, devs[i]->dev + sizeof(_PATH_DEV) - 1)) {
 			/* Device already exists. */
 			return (NULL);
 		}
 	}
-	if ((drv.dc = match_disk_pattern(dev)) == NULL)
+	if ((dev.iface = iface_from_name(devname)) == NULL)
 		return (NULL);
-	if (drv.dc->class == MTP) {
-		if (is_mtp_dev(dev))
-			return (add_mtp_device(dev));
+	dev.st = get_storage_type(devname);
+	if (dev.st == NULL && dev.iface->type != IF_TYPE_CD)
 		return (NULL);
-	}
-	if (!is_mountable(dev))
-		return (NULL);
-	if (drv.dc->class == CDROM) {
-		/* Ignore devices like 'acd0t01' and atapicam devices */
-		for (p = strlen(dev) - 1 + dev; isdigit(*p) && p != dev; p--)
-			;
-		if (*p == 't')
+	if (dev.iface->type == IF_TYPE_LVM) {
+		realdev = get_lvm_dev(devname);
+		if (realdev == NULL)
 			return (NULL);
-		if (drv.dc->system == CAM && is_atapicam(dev))
-			return (NULL);
-	}
-	path = devpath(dev);
-	if ((drv.has_media = has_media(path)))
-		drv.fs = getfs(path);
-	else
-		drv.fs = NULL;
-	if (drv.dc->class == MSD && drv.has_media && drv.fs == NULL) {
-		/* Mass storage device with unknown filesystem. */
-		return (NULL);
-	}
-	drvp = realloc(drives, sizeof(drive_t *) * (ndrives + 1));
-	if (drvp == NULL)
-		err(EXIT_FAILURE, "realloc()");
-	drives = drvp;
-	if ((drives[ndrives] = malloc(sizeof(drive_t))) == NULL)
-		err(EXIT_FAILURE, "malloc()");
-	if ((drives[ndrives]->dev = strdup(path)) == NULL)
-		err(EXIT_FAILURE, "strdup()");
-	if (drv.fs != NULL && (p = get_label(dev, drv.fs->name)) != NULL) {
-		if ((drives[ndrives]->name = strdup(p)) == NULL)
+		if ((dev.realdev = strdup(realdev)) == NULL)
 			err(EXIT_FAILURE, "strdup()");
-	} else if ((drives[ndrives]->name = strdup(dev)) == NULL)
+	}
+	if (dev.st != NULL) {
+		if (dev.st->type == ST_MTP)
+			return (add_mtp_device(devname));
+		else if (dev.st->type == ST_PTP)
+			return (add_ptp_device(devname));
+	}
+	if (!is_mountable(devname))
+		return (NULL);
+	if (dev.iface->type == IF_TYPE_CD) {
+		/* Ignore devices like 'cd0a' */
+		p = strchr(devname, '\0') - 1;
+		if (strchr("abcdefgh", *p) != NULL)
+			return (NULL);
+	}
+	path = devpath(devname);
+	if ((dev.has_media = has_media(path)))
+		dev.fs = getfs(path);
+	else
+		dev.fs = NULL;
+	if (dev.fs == NULL && dev.has_media) {
+		if (dev.st != NULL) {
+			if (dev.st->type != ST_USB_CARDREADER &&
+			    dev.st->type != ST_MMC &&
+			    dev.iface->type != IF_TYPE_CD) {
+				/* HDD/USB stick with unknown filesystem. */
+				return (NULL);
+			}
+		}
+	}
+	if (dev.iface->type == IF_TYPE_DA || dev.iface->type == IF_TYPE_CD)
+		dev.ejectable = true;
+	else
+		dev.ejectable = false;
+	if ((devp = malloc(sizeof(sdev_t))) == NULL)
+		err(EXIT_FAILURE, "malloc()");
+	if ((devp->dev = strdup(path)) == NULL)
+		err(EXIT_FAILURE, "strdup()");
+	if (dev.fs != NULL && (p = get_label(devname, dev.fs->name)) != NULL) {
+		if ((devp->name = strdup(p)) == NULL)
+			err(EXIT_FAILURE, "strdup()");
+	} else if ((devp->name = strdup(devname)) == NULL)
 		err(EXIT_FAILURE, "strdup()");
 
 	/*
-	 * Get all glabels for this drive. Drives with UFS can have more than
+	 * Get all glabels for this device. Drives with UFS can have more than
 	 * one glabel: ufs/somename, or label/somename, and ufsid/id.
 	 */
 	for (i = j = 0; i < NGLBLPRFX; i++) {
-		if ((p = get_geom_label(dev, glblprfx[i])) != NULL) {
-			if ((drives[ndrives]->glabel[j++] = strdup(p)) == NULL)
+		if ((p = get_geom_label(devname, glblprfx[i])) != NULL) {
+			if ((devp->glabel[j++] = strdup(p)) == NULL)
 				err(EXIT_FAILURE, "strdup()");
 		}
 	}
 	/* Terminate glabel list. */
-	drives[ndrives]->glabel[j] = NULL;
-	drives[ndrives]->dc	   = drv.dc;
-	drives[ndrives]->fs	   = drv.fs;
-	drives[ndrives]->mounted   = false;
-	drives[ndrives]->mntpt	   = NULL;
-	drives[ndrives]->realdev   = NULL;
-	drives[ndrives]->has_media = drv.has_media;
-	drives[ndrives]->speed	   = dsbcfg_getval(cfg, CFG_CDRSPEED).integer;
+	devp->glabel[j]	= NULL;
+	
+	devp->st	= dev.st;
+	devp->iface     = dev.iface;
+	devp->fs	= dev.fs;
+	devp->mounted   = false;
+	devp->mntpt     = NULL;
+	devp->realdev   = dev.realdev;
+	devp->has_media = dev.has_media;
+	devp->visible	= false;
+	devp->ejectable = dev.ejectable;
 
 	/* Set max. CD/DVD reading speed. */
-	if (drives[ndrives]->dc->class == CDROM) {
+	if (devp->iface->type == IF_TYPE_CD) {
 		speed = dsbcfg_getval(cfg, CFG_CDRSPEED).integer * 177;
-		if ((fd = open(drives[ndrives]->dev, O_RDWR)) != -1) {
+		if ((fd = open(devp->dev, O_RDWR)) != -1) {
 			if (ioctl(fd, CDRIOCREADSPEED, &speed) == -1) {
 				logprint("ioctl(%s, CDRIOCREADSPEED)",
-				    drives[ndrives]->dev);
+				    devp->dev);
 			}
 			(void)close(fd);
 		} else
-			logprint("open(%s)", drives[ndrives]->dev);
+			logprint("open(%s)", devp->dev);
 	}
-	(void)pthread_mutex_init(&drives[ndrives]->mtx, NULL);
+	(void)pthread_mutex_init(&devp->mtx, NULL);
 
-	(void)getmntpt(drives[ndrives]);
-	if (drives[ndrives]->mntpt != NULL)
-		drives[ndrives]->mounted = true;
-
-	if (drives[ndrives]->dc->class == LLV) {
-		if ((p = get_lv_dev(dev)) != NULL) {
-			path = devpath(p);
-			if ((drives[ndrives]->realdev = strdup(path)) == NULL)
-				err(EXIT_FAILURE, "strdup()");
-			drives[ndrives]->dt = get_disktype(path, drv.dc);
-		} else {
-			if (errno != 0) {
-				logprint("Couldn't get physical device of %s",
-				    dev);
-			} else {
-				logprintx("Couldn't get physical device of %s",
-				    dev);
-			}
-			ndrives++;
-			del_drive(drives[ndrives - 1]);
-
-			return (NULL);
-		}
-	} else
-		drives[ndrives]->dt = get_disktype(path, drv.dc);
-	if (drives[ndrives]->dc->class == LLV)
-		drives[ndrives]->polling = false;
-	else if (drives[ndrives]->dc->class == CDROM ||
-	    drives[ndrives]->dc->class == FLOPPY     ||
-	    drives[ndrives]->dc->class == MMC	     ||
-	    drives[ndrives]->dt->dt_type == DSK_TYPE_USBDISK)
-		drives[ndrives]->polling = true;
+	(void)getmntpt(devp);
+	if (devp->mntpt != NULL)
+		devp->mounted = true;
+	if (devp->iface->type == IF_TYPE_CD  ||
+	    devp->iface->type == IF_TYPE_MMC ||
+	    (devp->st != NULL && devp->st->type == ST_USB_CARDREADER))
+		devp->polling = true;
 	else
-		drives[ndrives]->polling = false;
-
-	if (drives[ndrives]->dc->system == CAM &&
-	    drives[ndrives]->dc->class != LLV) {
-		drives[ndrives]->model = get_cam_modelname(dev);
-	} else if (drives[ndrives]->dc->system == ATA)
-		drives[ndrives]->model = get_ata_modelname(dev);
-	else
-		drives[ndrives]->model = NULL;
+		devp->polling = false;
+	switch (devp->iface->type) {
+	case IF_TYPE_DA:
+	case IF_TYPE_CD:
+	case IF_TYPE_ADA:
+		devp->model = get_cam_modelname(devname);
+		break;
+	default:
+		devp->model = NULL;
+	}
 	/* Ckeck if polling is undesirable for this device. */
 	for (v = dsbcfg_getval(cfg, CFG_POLL_EXCEPTIONS).strings;
 	    v != NULL && *v != NULL; v++) {
-		if (drives[ndrives]->model == NULL)
-			continue;
-		if (fnmatch(*v, drives[ndrives]->model, FNM_CASEFOLD) == 0)
-			drives[ndrives]->polling = false;
+		if (devp->model == NULL)
+			break;
+		if (fnmatch(*v, devp->model, FNM_CASEFOLD) == 0)
+			devp->polling = false;
 	}
-	if (drives[ndrives]->polling)
-		add_to_pollqueue(drives[ndrives]);
-	if (drives[ndrives]->has_media && drives[ndrives]->fs != NULL)
-		notifybc(drives[ndrives], true);
-	return (drives[ndrives++]);
+	if (devp->polling)
+		add_to_pollqueue(devp);
+	if (devp->has_media && devp->fs != NULL)
+		devp->visible = true;
+	else if (devp->has_media && devp->st != NULL) {
+		switch (devp->st->type) {
+		case ST_CDDA:
+		case ST_SVCD:
+		case ST_VCD:
+			devp->visible = true;
+			break;
+		default:
+			break;
+		}
+	}
+	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
+	if (devs == NULL)
+		err(EXIT_FAILURE, "realloc()");
+	devs[ndevs++] = devp;
+	if (devp->st == NULL)
+		devp->visible = false;
+	if (devp->visible)
+		notifybc(devp, true);
+
+	return (devp);
 }
 
 /*
- * Removes the given drive object from the drive list.
+ * Removes the given device object from the device list.
  */
 static void
-del_drive(drive_t *drvp)
+del_device(sdev_t *devp)
 {
 	int		i, j;
 	pthread_mutex_t mtx;
 
-	for (i = 0; i < ndrives && drvp != drives[i]; i++)
+	for (i = 0; i < ndevs && devp != devs[i]; i++)
 		;
-	if (i == ndrives)
+	if (i == ndevs)
 		return;
-	mtx = drives[i]->mtx;
+	mtx = devs[i]->mtx;
 
-	del_from_pollqueue(drives[i]);
+	del_from_pollqueue(devs[i]);
 
-	if (drives[i]->has_media)
-		notifybc(drives[i], false);
+	if (devs[i]->has_media && devs[i]->visible)
+		notifybc(devs[i], false);
 	/*
 	 * Try to remove the mount table entry if the device was removed
 	 * without unmounting it first.
 	 */
-	if (getmntpt(drives[i]) != NULL) {
-		(void)unmount(drives[i]->mntpt, MNT_FORCE);
-		(void)rmntpt(drives[i]->mntpt);
+	if (getmntpt(devs[i]) != NULL) {
+		(void)unmount(devs[i]->mntpt, MNT_FORCE);
+		(void)rmntpt(devs[i]->mntpt);
 	}
-	free(drives[i]->mntpt);
-	free(drives[i]->dev);
-	free(drives[i]->name);
-	free(drives[i]->model);
-	free(drives[i]->realdev);
+	free(devs[i]->mntpt);
+	free(devs[i]->dev);
+	free(devs[i]->name);
+	free(devs[i]->model);
+	free(devs[i]->realdev);
 
-	for (j = 0; j < NGLBLPRFX && drives[i]->glabel[j] != NULL; j++)
-		free(drives[i]->glabel[j]);
-	free(drives[i]);
+	for (j = 0; j < NGLBLPRFX && devs[i]->glabel[j] != NULL; j++)
+		free(devs[i]->glabel[j]);
+	free(devs[i]);
 
-	for (; i < ndrives - 1; i++)
-		drives[i] = drives[i + 1];
-	ndrives--;
+	for (; i < ndevs - 1; i++)
+		devs[i] = devs[i + 1];
+	ndevs--;
 	(void)pthread_mutex_destroy(&mtx);
 }
 
-/*
- * Looks up the given device in the disk class table.
- */
-static const dskcl_t *
-match_disk_pattern(const char *str)
+static char *
+ugen_to_gphoto_port(const char *ugen)
 {
-	int	      i, j;
-	size_t	      len;
-	const char    *p;
-	const dskcl_t *dc;
+	int	    bus, addr;
+	static char port[sizeof("usb:###,###") + 1];
 
-	str = devbasename(str);
-	for (i = 0; i < NDISK_CLASSES; i++) {
-		len = strlen(disk_classes[i].pattern);
-		if (len && strncmp(str, disk_classes[i].pattern, len) == 0) {
-			if (disk_classes[i].class == LLV) {
-				if ((p = get_lv_dev(str)) != NULL)
-					dc = match_disk_pattern(p);
-				if (p == NULL || dc == NULL)
-					return (&disk_classes[i]);
-				for (j = 0; j < NDISK_CLASSES; j++)
-					if (disk_classes[j].class == LLV &&
-					    disk_classes[j].system ==
-					    dc->system) {
-						return (&disk_classes[j]);
-					}
-				return (&disk_classes[i]);
-			}
-			if (isalpha(str[len]) || str[len] == '\0') {
-				/* No device number */
-				continue;
-			}
-			return (&disk_classes[i]);
-		}
-	}
-	return (NULL);
+	get_ugen_bus_and_addr(ugen, &bus, &addr);
+	(void)snprintf(port, sizeof(port) - 1, "usb:%03d,%03d", bus, addr);
+
+	return (port);
 }
 
-static bool
-get_ugen_bus_and_addr(const char *ugen, int *bus, int *addr)
+static int
+get_ugen_type(const char *ugen)
 {
-	int  n;
-	char num[4];
-
-	if (strncmp(ugen, "ugen", 4) != 0)
-		return (false);
-	ugen += 4;
-	for (n = 0; n < 4 && isdigit(*ugen);)
-		num[n++] = *ugen++;
-	if (*ugen++ != '.')
-		return (false);
-	num[n] = '\0';
-	*bus = strtol(num, NULL, 10);
-
-	for (n = 0; n < 3 && isdigit(*ugen);)
-		num[n++] = *ugen++;
-	if (*ugen != '\0')
-		return (false);
-	num[n] = '\0';
-	*addr = strtol(num, NULL, 10);
-	
-	return (true);
-}
-	
-static bool
-is_mtp_dev(const char *ugen)
-{
-	int  i, j, bus, addr;
+	int  i, j, bus, addr, type;
 	bool found;
 	char buf[256];
 	struct libusb20_device	*pdev;
@@ -2209,9 +2369,9 @@ is_mtp_dev(const char *ugen)
 	struct LIBUSB20_INTERFACE_DESC_DECODED *idesc;
 
 	if (!get_ugen_bus_and_addr(ugen, &bus, &addr))
-		return (false);
+		return (-1);
 	pbe = libusb20_be_alloc_default();
-	for (found = false, pdev = NULL;
+	for (type = -1, found = false, pdev = NULL;
 	    !found && (pdev = libusb20_be_device_foreach(pbe, pdev));) {
 		if (libusb20_dev_get_bus_number(pdev) != bus ||
 		    libusb20_dev_get_address(pdev) != addr)
@@ -2219,17 +2379,39 @@ is_mtp_dev(const char *ugen)
 		if (libusb20_dev_open(pdev, 0))
 			err(EXIT_FAILURE, "libusb20_dev_open()");
 		ddesc = libusb20_dev_get_device_desc(pdev);
-		for (i = 0; i !=  ddesc->bNumConfigurations; i++) {
+		for (i = 0; i !=  ddesc->bNumConfigurations && !found; i++) {
 			cfg = libusb20_dev_alloc_config(pdev, i);
 			if (cfg == NULL)
 				continue;
-			for (j = 0; j != cfg->num_interface; j++) {
+			for (j = 0; j != cfg->num_interface && !found; j++) {
 				idesc = &(cfg->interface[j].desc);
-				if (libusb20_dev_req_string_simple_sync(pdev,
-				    idesc->iInterface, buf, sizeof(buf)) != 0)
-					continue;
-				else if (strcmp(buf, "MTP") == 0)
+				if (idesc->bInterfaceClass == USB_CLASS_UMASS) {
+					switch (idesc->bInterfaceSubClass) {
+					case USB_SUBCLASS_UMASS:
+						type = ST_USBDISK;
+						found = true;
+						break;
+					case USB_SUBCLASS_MMC:
+						type = ST_USB_CARDREADER;
+						found = true;
+						break;
+					}
+				} else if (idesc->bInterfaceClass ==
+				    USB_CLASS_PTP &&
+					idesc->bInterfaceSubClass ==
+				    USB_SUBCLASS_PTP &&
+					idesc->bInterfaceProtocol ==
+				    USB_PROTOCOL_PTP) {
+					type = ST_PTP;
 					found = true;
+				} else if (libusb20_dev_req_string_simple_sync(
+				    pdev, idesc->iInterface, buf,
+				    sizeof(buf)) != 0)
+					continue;
+				else if (strcmp(buf, "MTP") == 0) {
+					found = true;
+					type = ST_MTP;
+				}
 			}
 			free(cfg);
 		}
@@ -2238,46 +2420,11 @@ is_mtp_dev(const char *ugen)
 	}
 	libusb20_be_free(pbe);
 
-	return (found);
+	return (type);
 }
 
 static char *
-get_mtp_label(const char *ugen)
-{
-	int	    bus, addr;
-	bool	    found;
-	static char *p, buf[256];
-	struct libusb20_device	*pdev;
-	struct libusb20_backend	*pbe;
-	struct LIBUSB20_DEVICE_DESC_DECODED *ddesc;
-
-	if (!get_ugen_bus_and_addr(ugen, &bus, &addr))
-		return (false);
-	pbe = libusb20_be_alloc_default();
-	for (found = false, pdev = NULL, p = NULL;
-	    !found && (pdev = libusb20_be_device_foreach(pbe, pdev));) {
-		if (libusb20_dev_get_bus_number(pdev) == bus &&
-		    libusb20_dev_get_address(pdev) == addr) {
-			found = true;
-			if (libusb20_dev_open(pdev, 0))
-				err(EXIT_FAILURE, "libusb20_dev_open()");
-			ddesc = libusb20_dev_get_device_desc(pdev);
-			if (ddesc != NULL) {
-				if (!libusb20_dev_req_string_simple_sync(pdev,
-				    ddesc->iProduct, buf, sizeof(buf) - 1))
-					p = buf;
-			}
-			if (libusb20_dev_close(pdev))
-                        	err(EXIT_FAILURE, "libusb20_dev_close()");
-		}
-	}
-	libusb20_be_free(pbe);
-
-	return (!found ? NULL : p);
-}
-
-static char *
-get_lv_dev(const char *path)
+get_lvm_dev(const char *path)
 {
 	static char	 dev[512], *p;
 	struct gmesh	 mesh;
@@ -2418,152 +2565,96 @@ get_cam_modelname(const char *dev)
 }
 
 /*
- * Reads the modelname from a ATA device. This information can be used for
- * device specific configurations.  See  the "poll_exceptions"-variable in
- * dsbmd.conf.
- */
-static char *
-get_ata_modelname(const char *dev)
-{
-	int   chan, i, fd, len, maxchan;
-	char *p;
-	struct ata_ioc_devices atadev;
-	
-	dev = devbasename(dev);
-	if ((fd = open("/dev/ata", O_RDONLY)) == -1)
-		err(EXIT_FAILURE, "open(/dev/ata)");
-	if (ioctl(fd, IOCATAGMAXCHANNEL, &maxchan) == -1)
-		err(EXIT_FAILURE, "ioctl(IOCATAGMAXCHANNEL)");
-	for (chan = 0; chan < maxchan; chan++) {
-		atadev.channel = chan;
-		if (ioctl(fd, IOCATADEVICES, &atadev) == -1)
-			continue;
-		for (i = 0; i < 2; i++) {
-			/* Just compare the diskname, not the slice. */
-			len = strlen(atadev.name[i]);
-			if (len > 0 && strncmp(atadev.name[i], dev, len) == 0)
-				break;
-		}
-		if (i < 2)
-			break;
-	}
-	(void)close(fd);
-
-	if (chan >= maxchan || i >= 2)
-		return (NULL);
-	/* Nul-terminate model name, and remove trailing whitespaces. */
-	p = (char *)atadev.params[i].model +
-	    sizeof(atadev.params[i].model) - 1;
-	while (p != (char *)atadev.params[i].model &&
-	    (isspace(*p) ||  *p == '\0'))
-		*p-- = '\0';
-	/* Nul-terminate revision string, and remove trailing whitespaces. */
-	p = (char *)atadev.params[i].revision +
-	    sizeof(atadev.params[i].revision) - 1;
-	while (p != (char *)atadev.params[i].revision &&
-	    (isspace(*p) ||  *p == '\0'))
-		*p-- = '\0';
-	len = strlen((char *)atadev.params[i].model) +
-	      strlen((char *)atadev.params[i].revision);
-	if ((p = malloc(len)) == NULL)
-		return (NULL);
-	(void)sprintf(p, "%s %s", atadev.params[i].model,
-	    atadev.params[i].revision);
-	return (p);
-}
-
-/*
  * Unmounts a CD/DVD and ejects it. If 'force' is true, unmounting
  * the media, even if it's busy, will be enforced.
  */
 static int
-eject_media(client_t *cli, drive_t *drvp, bool force)
+eject_media(client_t *cli, sdev_t *devp, bool force)
 {
-	int	  fd, i, error;
+	int	  i, error;
 	char	  *disk;
 	union ccb *ccb;
 	struct cam_device *cd;
 
-	if ((drvp->mounted && drvp->fs->mntcmd != NULL) ||
-	    getmntpt(drvp) != NULL) {
-		if ((error = unmount_drive(cli, drvp, force, true)) != 0) {
-			cliprint(cli, "E:command=eject:code=%d", error);
-			return (error);
-		}
-	}
-	if (drvp->dc->system == ATA) {
-		if (drvp->dc->class != CDROM) {
-			cliprint(cli, "E:command=eject:code=%d",
-			    ERR_NOT_EJECTABLE);
-			return (ERR_NOT_EJECTABLE);
-		}
-		if ((fd = open(drvp->dev, O_RDWR)) == -1) {
-			cliprint(cli, "E:command=eject:code=%d", errno);
-			logprint("Opening of %s by UID %d failed", drvp->dev,
-			    cli->uid);
-			return (errno);
-		}
-		if (ioctl(fd, CDIOCALLOW) == -1 || ioctl(fd, CDIOCEJECT) == -1)
-			error = errno;
-		else
-			error = 0;
-		(void)close(fd);
-	} else if (drvp->dc->system == CAM) {
-		if (drvp->dc->class == LLV)
-			disk = get_diskname(drvp->realdev);
-		else
-			disk = get_diskname(drvp->dev);
-		if ((cd = cam_open_device(disk, O_RDWR)) == NULL) {
-			cliprint(cli, "E:command=eject:code=%d", errno);
-			logprint("cam_open_device(%s)", disk);
-			return (errno);
-		}
-		if ((ccb = cam_getccb(cd)) == NULL) {
-			error = errno;
-			cliprint(cli, "E:command=eject:code=%d", error);
-			logprint("cam_getccb()");
-			cam_close_device(cd);
-			return (error);
-		}
-		scsi_start_stop(&ccb->csio, 1, NULL, MSG_ORDERED_Q_TAG,
-		    0, 1, 0, 0, 100000);
-		for (i = 0; i < 3; i++) {
-			if (cam_send_ccb(cd, ccb) == -1) {
-				error = errno;
-				logprint("cam_send_ccb()");
-			} else if ((ccb->ccb_h.status & CAM_STATUS_MASK) ==
-			    CAM_REQ_CMP) {
-				error = 0;
-				/*
-				 * Some USB devices must be accessed to make
-				 * them remove the associated CAM device.
-				 */
-				(void)has_media(drvp->dev);
-				break;
-			} else
-				error = -1;
-		}
-		cam_close_device(cd);
-		cam_freeccb(ccb);
-	} else {
+	if (!devp->ejectable) {
 		cliprint(cli, "E:command=eject:code=%d", ERR_NOT_EJECTABLE);
 		return (ERR_NOT_EJECTABLE);
 	}
+	if ((devp->mounted && devp->fs->mntcmd != NULL) ||
+	    getmntpt(devp) != NULL) {
+		if ((error = unmount_device(cli, devp, force, true)) != 0) {
+			cliprint(cli, "E:command=eject:code=%d", error);
+			return (error);
+		}
+	}
+	if (devp->iface->type == IF_TYPE_LVM)
+		disk = get_diskname(devp->realdev);
+	else
+		disk = get_diskname(devp->dev);
+	if ((cd = cam_open_device(disk, O_RDWR)) == NULL) {
+		cliprint(cli, "E:command=eject:code=%d", errno);
+		logprint("cam_open_device(%s)", disk);
+		return (errno);
+	}
+	if ((ccb = cam_getccb(cd)) == NULL) {
+		error = errno;
+		cliprint(cli, "E:command=eject:code=%d", error);
+		logprint("cam_getccb()");
+		cam_close_device(cd);
+		return (error);
+	}
+	scsi_start_stop(&ccb->csio, 1, NULL, MSG_ORDERED_Q_TAG,
+	    0, 1, 0, 0, 100000);
+	for (i = 0; i < 3; i++) {
+		if (cam_send_ccb(cd, ccb) == -1) {
+			error = errno;
+			logprint("cam_send_ccb()");
+		} else if ((ccb->ccb_h.status & CAM_STATUS_MASK) ==
+		    CAM_REQ_CMP) {
+			error = 0;
+			/*
+			 * Some USB devices must be accessed to make
+			 * them remove the associated CAM device.
+			 */
+			(void)has_media(devp->dev);
+			break;
+		} else
+			error = -1;
+	}
+	cam_close_device(cd);
+	cam_freeccb(ccb);
 	if (error != 0) {
 		cliprint(cli, "E:command=eject:code=%d", error);
 		if (error > (1 << 8))
-			logprint("Ejecting %s by UID %d failed", drvp->dev,
+			logprint("Ejecting %s by UID %d failed", devp->dev,
 			    cli->uid);
 		else
-			logprintx("Ejecting %s by UID %d failed", drvp->dev,
+			logprintx("Ejecting %s by UID %d failed", devp->dev,
 			    cli->uid);
-	} else
+	} else {
 		cliprint(cli, "O:command=eject");
+		/*
+		 * Some USB sticks seem to be ejected, but do not disappear
+		 * from devfs. Just to make sure that clients can't send
+		 * further commands to the device, we let it vanish.
+		 */
+		if (devp->st != NULL && devp->st->type == ST_USBDISK)
+			del_device(devp);
+		else if (devp->iface->type == IF_TYPE_CD) {
+			/*
+			 * In case of CD/DVD notify the client immediately,
+			 * instead of waiting for the next do_poll().
+			 */
+			devp->visible	= false;
+			devp->has_media = false;
+			notifybc(devp, false);
+		}
+	}
 	return (error);
 }
 
 static int
-set_cdrspeed(client_t *cli, drive_t *drvp, int speed)
+set_cdrspeed(client_t *cli, sdev_t *devp, int speed)
 {
 	int fd, error;
 
@@ -2573,79 +2664,26 @@ set_cdrspeed(client_t *cli, drive_t *drvp, int speed)
 	}
 	speed *= 177;
 	
-	if ((fd = open(drvp->dev, O_RDWR)) == -1) {
+	if ((fd = open(devp->dev, O_RDWR)) == -1) {
 		cliprint(cli, "E:command=speed:code=%d", errno);
-		logprint("open(%s)", drvp->dev);
+		logprint("open(%s)", devp->dev);
 		return (errno);
 	}
 	if (ioctl(fd, CDRIOCREADSPEED, &speed) == -1) {
 		error = errno;
-		logprint("ioctl(%s, CDRIOCREADSPEED, %d)", drvp->dev,
+		logprint("ioctl(%s, CDRIOCREADSPEED, %d)", devp->dev,
 		    speed / 177);
 		cliprint(cli, "E:command=speed:code=%d", errno);
 	} else {
 		error = 0;
-		drvp->speed = speed / 177;
-		cliprint(cli, "O:command=speed:speed=%d", drvp->speed);
+		devp->speed = speed / 177;
+		cliprint(cli, "O:command=speed:speed=%d", devp->speed);
 		cliprintbc(cli, "V:speed=%d:dev=%s",
-		    drvp->speed, drvp->dev);
+		    devp->speed, devp->dev);
 	}
 	(void)close(fd);
 
 	return (error);
-}
-
-/*
- * Check if the given device is an ATAPICAM device.
- */
-static bool
-is_atapicam(const char *dev)
-{
-	int  fd, chan, maxchan;
-	char *disk;
-	bool atapicam;
-	struct cam_device *cd;
-	struct ata_ioc_devices atadev;
-
-	/* 
-	 * If  ATA_CAM  is enabled, it deprecates all ATA drivers, and all ATA
-	 * device  interface  names  will be replaced by the corresponding CAM
-	 * names. Hence, checking if e.g. cd0's controller name is "ata", will
-	 * result  in  a false positive. So we have to check if an ATAPI CDROM
-	 * drive is installed.
-	 */
-	if ((fd = open("/dev/ata", O_RDONLY)) == -1) {
-		if (errno == ENOENT || errno == EINVAL)
-			return (false);
-		err(EXIT_FAILURE, "open(/dev/ata)");
-	}
-	if (ioctl(fd, IOCATAGMAXCHANNEL, &maxchan) == -1) {
-		(void)close(fd);
-		return (false);
-	}
-	for (chan = 0; chan < maxchan; chan++) {
-		atadev.channel = chan;
-		if (ioctl(fd, IOCATADEVICES, &atadev) == -1)
-			continue;
-		if ((atadev.params[0].config & ATA_ATAPI_TYPE_CDROM) ||
-		    (atadev.params[1].config & ATA_ATAPI_TYPE_CDROM))
-			break;
-	}
-	(void)close(fd);
-
-	if (chan >= maxchan)
-		/* No ATAPI CDROM found, hence no atapi cam.*/
-		return (false);
-	/* Check if the CDROM drive's controller is "ata". */
-	atapicam = false;
-	disk = get_diskname(dev);
-	if ((cd = cam_open_device(disk, O_RDWR)) != NULL) {
-		if (strcmp(cd->sim_name, "ata") == 0)
-			atapicam = true;
-		cam_close_device(cd);
-	} else
-		logprint("cam_open_device(): %s", cam_errbuf);
-	return (atapicam);
 }
 
 /* 
@@ -2715,7 +2753,7 @@ cliprintbc(client_t *exclude, const char *fmt, ...)
  * Send a device add/remove string to a client.
  */
 static void
-notify(client_t *cli, drive_t *drvp, bool add)
+notify(client_t *cli, sdev_t *devp, bool add)
 {
 	int  len;
 	char buf[_POSIX2_LINE_MAX];
@@ -2723,57 +2761,47 @@ notify(client_t *cli, drive_t *drvp, bool add)
 	if (add) {
 		len = 0;
 		len += snprintf(buf + len, sizeof(buf) - len, "+:dev=%s",
-		    drvp->dev);
-		if (drvp->fs != NULL) {
+		    devp->dev);
+		if (devp->fs != NULL) {
 			len += snprintf(buf + len, sizeof(buf) - len, ":fs=%s",
-			    drvp->fs->name);
+			    devp->fs->name);
 		}
-		if (drvp->name != NULL) {
+		if (devp->name != NULL) {
 			len += snprintf(buf + len, sizeof(buf) - len,
-			    ":volid=%s", drvp->name);
+			    ":volid=%s", devp->name);
 		}
-		if (drvp->mntpt != NULL) {
+		if (devp->mntpt != NULL) {
 			len += snprintf(buf + len, sizeof(buf) - len,
-			    ":mntpt=%s", drvp->mntpt);
+			    ":mntpt=%s", devp->mntpt);
 		}
 		len += snprintf(buf + len, sizeof(buf) - len, ":type=%s",
-		    drvp->dt->dt_name);
-		if (drvp->dc->class == CDROM) {
+		    devp->st->name);
+		if (devp->iface->type == IF_TYPE_CD) {
 			len += snprintf(buf + len, sizeof(buf) - len,
-			    ":speed=%d", drvp->speed);
-			if (drvp->fs != NULL) {
-				len += snprintf(buf + len, sizeof(buf) - len,
-				    ":cmds=mount,unmount,eject,speed");
-			} else {
-				len += snprintf(buf + len, sizeof(buf) - len,
-				    ":cmds=eject,speed");
-			}
-		} else if (drvp->dc->system == CAM) {
-			if (drvp->fs != NULL) {
-				len += snprintf(buf + len, sizeof(buf) - len,
-				    ":cmds=mount,unmount,eject");
-			}
-		} else if (drvp->fs != NULL) {
-			len += snprintf(buf + len, sizeof(buf) - len,
-			    ":cmds=mount,unmount");
+			    ":speed=%d", devp->speed);
 		}
+		len += snprintf(buf + len, sizeof(buf) - len, ":cmds=");
+		len += snprintf(buf + len, sizeof(buf) - len, "%s%s",
+		    devp->fs != NULL ? "mount,unmount" : "",
+		    devp->ejectable ? "," : "");
+		len += snprintf(buf + len, sizeof(buf) - len, "%s%s",
+		    devp->ejectable ? "eject" : "",
+		    devp->iface->type == IF_TYPE_CD ? ",speed" : "");
 		cliprint(cli, "%s", buf);
-	} else {
-		/* -<dev> */
-		cliprint(cli, "-:dev=%s", drvp->dev);
-	}
+	} else
+		cliprint(cli, "-:dev=%s", devp->dev);
 }
 
 /*
  * Send a device add/remove string to all clients.
  */
 static void
-notifybc(drive_t *drvp, bool add)
+notifybc(sdev_t *devp, bool add)
 {
 	int i;
 
 	for (i = 0; i < nclients; i++)
-		notify(clients[i], drvp, add);
+		notify(clients[i], devp, add);
 }
 
 static int
@@ -2873,7 +2901,7 @@ cmd_eject(client_t *cli, char **argv)
 {
 	int	i;
 	bool	force;
-	drive_t *drvp;
+	sdev_t *devp;
 
 	force = false;
 	for (i = 0; argv[i] != NULL && argv[i][0] == '-'; i++) {
@@ -2889,38 +2917,38 @@ cmd_eject(client_t *cli, char **argv)
 		cliprint(cli, "E:command=eject:code=%d", ERR_SYNTAX_ERROR);
 		return;
 	}
-	(void)pthread_mutex_lock(&drv_mtx);
-	if ((drvp = lookupdrv(argv[i])) == NULL) {
+	(void)pthread_mutex_lock(&dev_mtx);
+	if ((devp = lookup_dev(argv[i])) == NULL || !devp->visible) {
 		cliprint(cli, "E:command=eject:code=%d", ERR_NO_SUCH_DEVICE);
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 		return;
 	}
-	(void)pthread_mutex_lock(&drvp->mtx);
-	(void)pthread_mutex_unlock(&drv_mtx);
-	(void)eject_media(cli, drvp, force);
-	(void)pthread_mutex_unlock(&drvp->mtx);
+	(void)pthread_mutex_lock(&devp->mtx);
+	(void)eject_media(cli, devp, force);
+	(void)pthread_mutex_unlock(&devp->mtx);
+	(void)pthread_mutex_unlock(&dev_mtx);
 }
 
 static void
 cmd_size(client_t *cli, char **argv)
 {
 	int	      n, fd;
-	drive_t	      *drvp;
+	sdev_t	      *devp;
 	struct statfs s;
 
 	if (argv[0] == NULL) {
 		cliprint(cli, "E:command=size:code=%d", ERR_SYNTAX_ERROR);
 		return;
 	}
-	(void)pthread_mutex_lock(&drv_mtx);
-	if ((drvp = lookupdrv(argv[0])) == NULL) {
+	(void)pthread_mutex_lock(&dev_mtx);
+	if ((devp = lookup_dev(argv[0])) == NULL || !devp->visible) {
 		cliprint(cli, "E:command=size:code=%d", ERR_NO_SUCH_DEVICE);
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 		return;
 	}
-	(void)pthread_mutex_lock(&drvp->mtx);
-	(void)pthread_mutex_unlock(&drv_mtx);
-	if (drvp->mntpt != NULL) {
+	(void)pthread_mutex_lock(&devp->mtx);
+	(void)pthread_mutex_unlock(&dev_mtx);
+	if (devp->mntpt != NULL) {
 		/*
 		 * If a device was just mounted, it can happen that the
 		 * size information queried by statfs() are not correct.
@@ -2931,83 +2959,84 @@ cmd_size(client_t *cli, char **argv)
 		do {
 			if (n)
 				usleep(500000);
-			if (statfs(drvp->mntpt, &s) == -1) {
+			if (statfs(devp->mntpt, &s) == -1) {
 				cliprint(cli, "E:command=size:code=%d", errno);
-				(void)pthread_mutex_unlock(&drvp->mtx);
+				(void)pthread_mutex_unlock(&devp->mtx);
 				return;
 			}
 		} while (n++ < 3 && s.f_blocks <= 1);
 
 		cliprint(cli,
 		    "O:command=size:dev=%s:mediasize=%llu:free=%llu:used=%llu",
-		    drvp->dev,
+		    devp->dev,
 		    (uint64_t)(s.f_blocks * s.f_bsize),
 		    (uint64_t)(s.f_bsize  * s.f_bfree),
 		    (uint64_t)(s.f_bsize  * (s.f_blocks - s.f_bfree)));
 	} else {
-		if (drvp->dt->dt_type == DSK_TYPE_MTP) {
+		if (devp->st != NULL && (devp->st->type == ST_MTP ||
+		    devp->st->type == ST_PTP)) {
 			cliprint(cli,
 			    "O:command=size:dev=%s:mediasize=0:free=0:used=0",
-			    drvp->dev);
-			(void)pthread_mutex_unlock(&drvp->mtx);
+			    devp->dev);
+			(void)pthread_mutex_unlock(&devp->mtx);
 			return;
 		}
-		if ((fd = open(drvp->dev, O_RDONLY | O_NONBLOCK)) == -1) {
+		if ((fd = open(devp->dev, O_RDONLY | O_NONBLOCK)) == -1) {
 			cliprint(cli, "E:command=size:code=%d", errno);
-			(void)pthread_mutex_unlock(&drvp->mtx);
+			(void)pthread_mutex_unlock(&devp->mtx);
 			return;
 		}
 		cliprint(cli,
 		    "O:command=size:dev=%s:mediasize=%llu:free=0:used=0",
-		    drvp->dev, (uint64_t)g_mediasize(fd));
+		    devp->dev, (uint64_t)g_mediasize(fd));
 		(void)close(fd);
-		(void)pthread_mutex_unlock(&drvp->mtx);
+		(void)pthread_mutex_unlock(&devp->mtx);
 	}
-	(void)pthread_mutex_unlock(&drvp->mtx);
+	(void)pthread_mutex_unlock(&devp->mtx);
 }
 
 static void
 cmd_speed(client_t *cli, char **argv)
 {
 	int	speed;
-	drive_t *drvp;
+	sdev_t *devp;
 
 	if (argv[0] == NULL || argv[1] == NULL) {
 		cliprint(cli, "E:command=speed:code=%d", ERR_SYNTAX_ERROR);
 		return;
 	}
-	(void)pthread_mutex_lock(&drv_mtx);
-	if ((drvp = lookupdrv(argv[0])) == NULL) {
+	(void)pthread_mutex_lock(&dev_mtx);
+	if ((devp = lookup_dev(argv[0])) == NULL || !devp->visible) {
 		cliprint(cli, "E:command=speed:code=%d", ERR_NO_SUCH_DEVICE);
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 		return;
 	}
 	speed = strtol(argv[1], NULL, 10);
-	(void)pthread_mutex_lock(&drvp->mtx);
-	(void)pthread_mutex_unlock(&drv_mtx);
-	(void)set_cdrspeed(cli, drvp, speed);
-	(void)pthread_mutex_unlock(&drvp->mtx);
+	(void)pthread_mutex_lock(&devp->mtx);
+	(void)pthread_mutex_unlock(&dev_mtx);
+	(void)set_cdrspeed(cli, devp, speed);
+	(void)pthread_mutex_unlock(&devp->mtx);
 }
 
 static void
 cmd_mount(client_t *cli, char **argv)
 {
-	drive_t *drvp;
+	sdev_t *devp;
 
 	if (argv[0] == NULL) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_SYNTAX_ERROR);
 		return;
 	}
-	(void)pthread_mutex_lock(&drv_mtx);
-	if ((drvp = lookupdrv(argv[0])) == NULL) {
+	(void)pthread_mutex_lock(&dev_mtx);
+	if ((devp = lookup_dev(argv[0])) == NULL || !devp->visible) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_NO_SUCH_DEVICE);
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 		return;
 	}
-	(void)pthread_mutex_lock(&drvp->mtx);
-	(void)pthread_mutex_unlock(&drv_mtx);
-	(void)mount_drive(cli, drvp);
-	(void)pthread_mutex_unlock(&drvp->mtx);
+	(void)pthread_mutex_lock(&devp->mtx);
+	(void)pthread_mutex_unlock(&dev_mtx);
+	(void)mount_device(cli, devp);
+	(void)pthread_mutex_unlock(&devp->mtx);
 }
 
 static void
@@ -3015,7 +3044,7 @@ cmd_unmount(client_t *cli, char **argv)
 {
 	int	i;
 	bool	force;
-	drive_t *drvp;
+	sdev_t *devp;
 	pthread_mutex_t mtx;
 
 	force = false;
@@ -3032,22 +3061,22 @@ cmd_unmount(client_t *cli, char **argv)
 		cliprint(cli, "E:command=unmount:code=%d", ERR_SYNTAX_ERROR);
 		return;
 	}
-	(void)pthread_mutex_lock(&drv_mtx);
-	if ((drvp = lookupdrv(argv[i])) == NULL) {
+	(void)pthread_mutex_lock(&dev_mtx);
+	if ((devp = lookup_dev(argv[i])) == NULL || !devp->visible) {
 		cliprint(cli, "E:command=unmount:code=%d", ERR_NO_SUCH_DEVICE);
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 		return;
 	}
 	/*
-	 * Save mutex. If we unmount a fuse device, unmount_drive() will
-	 * delete the device at drvp, so drvp might be invalid after that.
+	 * Save mutex. If we unmount a fuse device, unmount_device() will
+	 * delete the device at devp, so devp might be invalid after that.
 	 */
-	mtx = drvp->mtx;
+	mtx = devp->mtx;
 
 	(void)pthread_mutex_lock(&mtx);
-	(void)unmount_drive(cli, drvp, force, false);
+	(void)unmount_device(cli, devp, force, false);
 	(void)pthread_mutex_unlock(&mtx);
-	(void)pthread_mutex_unlock(&drv_mtx);
+	(void)pthread_mutex_unlock(&dev_mtx);
 }
 
 static void
@@ -3070,11 +3099,11 @@ thr_check_mntbl(void *unused)
 			logprint("getfsstat()");
 			continue;
 		}
-		(void)pthread_mutex_lock(&drv_mtx);
+		(void)pthread_mutex_lock(&dev_mtx);
 		check_mntbl(buf, n);
 		check_fuse_mount(buf, n);
 		check_fuse_unmount(buf, n);
-		(void)pthread_mutex_unlock(&drv_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 	}
 }
 
@@ -3083,15 +3112,15 @@ check_fuse_mount(struct statfs *sb, int nsb)
 {
 	int	   i, j;
 	bool	   found;
-	drive_t	   *dp;
+	sdev_t	   *dp;
 	const char *q;
 
 	for (i = 0; i < nsb; i++) {
 		q = devbasename(sb[i].f_mntfromname);
 		/* Check for new FUSE device mounts */
 		if (strncmp(q, "fuse", 4) == 0) {
-			for (found = false, j = 0; j < ndrives && !found; j++) {
-				dp = drives[j];
+			for (found = false, j = 0; j < ndevs && !found; j++) {
+				dp = devs[j];
 				if (pthread_mutex_lock(&dp->mtx) != 0)
 					return;
 				if (dp->mntpt == NULL) {
@@ -3117,19 +3146,21 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 	int  i, j;
 	bool found;
 
-	for (i = 0; i < ndrives; i++) {
-		if (drives[i]->dc->class != FUSE)
+	for (i = 0; i < ndevs; i++) {
+		if (devs[i]->st == NULL)
 			continue;
-		if (pthread_mutex_lock(&drives[i]->mtx) != 0)
+		if (devs[i]->iface->type != IF_TYPE_FUSE)
+			continue;
+		if (pthread_mutex_lock(&devs[i]->mtx) != 0)
 			return;
 		for (j = 0, found = false; !found && j < nsb; j++) {
-			if (strcmp(drives[i]->mntpt, sb[j].f_mntonname) == 0)
+			if (strcmp(devs[i]->mntpt, sb[j].f_mntonname) == 0)
 				found = true;
 		}
 		if (!found)
-			del_drive(drives[i]);
+			del_device(devs[i]);
 		else
-			pthread_mutex_unlock(&drives[i]->mtx);
+			pthread_mutex_unlock(&devs[i]->mtx);
 	}
 }
 
@@ -3139,20 +3170,22 @@ check_mntbl(struct statfs *sb, int nsb)
 {
 	int	   i, j, k;
 	bool	   found;
-	drive_t	   *dp;
+	sdev_t	   *dp;
 	const char *p, *q, *mntpt;
 
-	for (i = 0; i < ndrives; i++) {
-		if (drives[i]->dc->class == FUSE)
+	for (i = 0; i < ndevs; i++) {
+		if (devs[i]->st == NULL)
 			continue;
-		if (pthread_mutex_lock(&drives[i]->mtx) != 0)
+		if (devs[i]->iface->type == IF_TYPE_FUSE)
+			continue;
+		if (pthread_mutex_lock(&devs[i]->mtx) != 0)
 			return;
-		dp = drives[i];
+		dp = devs[i];
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			q = devbasename(sb[j].f_mntfromname);
 			if (strcmp(devbasename(dp->dev), q) != 0) {
 				/*
-				 * Check if the drive was mounted using its
+				 * Check if the device was mounted using its
 				 * glabel.
 				 */
 				for (k = 0; !found && k < NGLBLPRFX &&

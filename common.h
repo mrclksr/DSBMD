@@ -24,10 +24,12 @@
 
 #ifndef _COMMON_H_
 #define _COMMON_H_
+#include <stdbool.h>
 
 extern void	   logprint(const char *, ...);
 extern void	   logprintx(const char *, ...);
 extern char	  *devpath(const char *);
+extern bool	   get_ugen_bus_and_addr(const char *, int *, int *);
 extern const char *devbasename(const char *);
 
 #endif	/* !_COMMON_H_ */

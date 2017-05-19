@@ -38,6 +38,7 @@
 #define ENV_LABEL		"DSBMD_LABEL"
 #define ENV_FILESYSTEM		"DSBMD_FILESYSTEM"
 #define ENV_MNTPT		"DSBMD_MNTPT"
+#define ENV_USB_PORT		"DSBMD_GPHOTO_USB_PORT"
 
 #define NGLBLPRFX		5
 #define GLBLPRFX		{ NULL, "label", "ufs", "ufsid", "gptid" }
@@ -45,8 +46,6 @@
 #define PATH_DEVD_SOCKET	"/var/run/devd.pipe"
 
 #define SOCKET_MODE		(S_IRWXU | S_IRWXG | S_IRWXO)
-
-#define PATH_TMP_MNT_TEMPLATE	"/tmp/mnt.XXXXXX"
 
 #define CMD_MOUNT		'M'
 #define CMD_UNMOUNT		'U'
@@ -72,61 +71,65 @@
 #define ERR_STRING_TOO_LONG	((1 << 8) + 0x10)
 #define ERR_BAD_STRING		((1 << 8) + 0x11)
 
-/*
- * Devices to look for
- */
-typedef struct dskcl_s {
-	char system;
-#define ATA	0x00
-#define CAM 	0x01
-#define MMC	0x02
-#define USB	0x03
-#define OTHER	0xff
-	char class;
-#define CDROM 	0x00
-#define MSD	0x01			 /* Mass storage devices */
-#define FLOPPY	0x02
-#define MD	0x03			 /* Memory disk */
-#define FUSE	0x04
-#define LLV	0x05
-#define MTP	0x06
-	const char *pattern;		 /* ad, da, cd ... */
-} dskcl_t;
+typedef enum DEV_TYPES {
+	ST_HDD,		ST_MMC,
+	ST_CDDA,	ST_USBDISK,
+	ST_DVD,		ST_DATACD,
+	ST_SVCD,	ST_UNKNOWN,
+	ST_VCD,		ST_PTP,
+	ST_MTP,		ST_USB_CARDREADER,
+	ST_FUSE
+} devt_t;
 
-enum DSK_TYPES {
-	CDR_TYPE_RAW,	CDR_TYPE_VCD,  CDR_TYPE_SVCD,	 CDR_TYPE_DVD,
-	CDR_TYPE_AUDIO, CDR_TYPE_DATA, CDR_TYPE_UNKNOWN, DSK_TYPE_USBDISK,
-	DSK_TYPE_HDD,	DSK_TYPE_FLOPPY, DSK_TYPE_MMC, DSK_TYPE_FUSE,
-	DSK_TYPE_MTP
-};
+typedef struct storage_type_s {
+	char	*name;
+	devt_t	type;
+} storage_type_t;
+
+typedef enum IF_TYPES {
+	IF_TYPE_DA,	IF_TYPE_ADA,
+	IF_TYPE_CD,	IF_TYPE_UGEN,
+	IF_TYPE_MMC,	IF_TYPE_FUSE,
+	IF_TYPE_MD,	IF_TYPE_LVM,
+	IF_TYPE_MTP,	IF_TYPE_PTP
+} ift_t;
+
+typedef struct iface_s {
+	char	*re;
+#define RE_DA	"^da[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
+#define RE_UGEN "^ugen[0-9]{1,3}\\.[0-9]{1,2}$"
+#define RE_CD	"^cd[0-9]{1}[a-h]?$"
+#define RE_ADA	"^ada[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
+#define RE_MMC	"^mmcsd[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
+#define RE_MD	"^md[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
+#define RE_LVM	"^linux_lvm/[a-zA-Z0-9]+"
+#define RE_FUSE NULL
+#define RE_MTP  NULL
+#define RE_PTP  NULL
+	ift_t	type;
+} iface_t;
 
 /*
- * Struct to identify disks. E.g., VCD, DVD, AUDIO CD, etc.
+ * Struct to manage storage devices
  */
-typedef struct dsktype_s {
-	int   dt_type;			 /* Numeric disk type ID. */
-	char *dt_name;			 /* Disk type string. */
-} dsktp_t;
-
-/*
- * Struct to manage disks found on the system
- */
-typedef struct drive_s {
+typedef struct sdev_s {
 	int		speed;
 	bool		mounted;
 	bool		has_media;
 	bool		polling;	  /* May be polled. */
-	char		*realdev;	  /* Actual device in case of a LV */
+	bool		visible;	  /* Vsible to client? */
+	bool		ejectable;
 	char		*name;		  /* Volume ID */
 	char		*model;		  /* "<vendor> <product> <revision>" */
 	char		*glabel[NGLBLPRFX];/* GEOM labels. */
 	char		*dev;		  /* Path to special file */
 	char		*mntpt;		  /* Mountpoint */
+	char		*realdev;	  /* Actual device in case of LVM */
 	fs_t		*fs;		  /* Filesystem type */
-	const dsktp_t	*dt;		  /* Disk type */
-	const dskcl_t	*dc;		  /* Disk class */
+	const iface_t	*iface;		  /* Interface type */
+	const storage_type_t *st;  	  /* Media/storage type */
 	pthread_mutex_t mtx;
-} drive_t;
+} sdev_t;
 
 /*
  * Struct to manage clients.

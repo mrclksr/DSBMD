@@ -36,6 +36,8 @@
 #include <ufs/ufs/dinode.h>
 #include <ufs/ffs/fs.h>
 #include <sys/endian.h>
+#include <libusb20_desc.h>
+#include <libusb20.h>
 #include <libgeom.h>
 #include <unistd.h>
 #include <isofs/cd9660/iso.h>
@@ -92,7 +94,8 @@ fs_t fstype[] = {
 	{ "reiserfs", REISERFS,NULL, NULL,    NULL		    },
 	{ "xfs",      XFS,     NULL, NULL,    NULL		    },
 	{ "fuse",     FUSEFS,  NULL, NULL,    NULL		    },
-	{ "mtp",      MTPFS,   NULL, NULL,    NULL		    }
+	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL		    },
+	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL		    }
 };
 
 static struct getfs_s {
@@ -430,7 +433,6 @@ get_exfat_label(const char *dev)
 				label[i] = p[EXFAT_LABEL_OFFSET + i * 2];
 			}
 			label[i] = 0;
-			puts(label);
 			(void)fclose(fp);
 			return (label);
 		}
@@ -496,7 +498,6 @@ get_geom_label(const char *path, const char *prefix)
 	struct gprovider *pp;
 
 	path = devbasename(path);
-
 	if (geom_gettree(&mesh) != 0)
 		return (NULL);
 	cp = NULL;
@@ -513,7 +514,6 @@ get_geom_label(const char *path, const char *prefix)
 			continue;
 		if (strcmp(path, gp->lg_name) != 0)
 			continue;
-		
 		pp = LIST_FIRST(&gp->lg_provider);
 		if (pp == NULL || pp->lg_name == NULL) {
 			geom_deletetree(&mesh);
@@ -536,6 +536,42 @@ get_geom_label(const char *path, const char *prefix)
 	return (NULL);
 }
 
+static char *
+get_ugen_label(const char *ugen)
+{
+	int	    bus, addr;
+	bool	    found;
+	static char *p, buf[256];
+	struct libusb20_device	*pdev;
+	struct libusb20_backend	*pbe;
+	struct LIBUSB20_DEVICE_DESC_DECODED *ddesc;
+
+	if (!get_ugen_bus_and_addr(ugen, &bus, &addr))
+		return (NULL);
+	pbe = libusb20_be_alloc_default();
+	for (found = false, pdev = NULL, p = NULL;
+	    !found && (pdev = libusb20_be_device_foreach(pbe, pdev));) {
+		if (libusb20_dev_get_bus_number(pdev) == bus &&
+		    libusb20_dev_get_address(pdev) == addr) {
+			found = true;
+			if (libusb20_dev_open(pdev, 0))
+				err(EXIT_FAILURE, "libusb20_dev_open()");
+			ddesc = libusb20_dev_get_device_desc(pdev);
+			if (ddesc != NULL) {
+				if (!libusb20_dev_req_string_simple_sync(pdev,
+				    ddesc->iProduct, buf, sizeof(buf) - 1))
+					p = buf;
+			}
+			if (libusb20_dev_close(pdev))
+                        	err(EXIT_FAILURE, "libusb20_dev_close()");
+		}
+	}
+	libusb20_be_free(pbe);
+
+	return (!found ? NULL : p);
+}
+
+
 /*
  * Reads the vol ID from various filesystems.
  */
@@ -547,7 +583,8 @@ get_label(const char *dev, const char *fs)
 	if (fs == NULL)
 		return (NULL);
 	path = devpath(dev);
-
+	if (strcmp(fs, "ptpfs") == 0 || strcmp(fs, "mtpfs") == 0)
+		return (get_ugen_label(dev));
 	if (strcmp(fs, "msdosfs") == 0)
 		label = get_geom_label(path, "msdosfs");
 	else if (strcmp(fs, "ufs") == 0) {

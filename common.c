@@ -26,10 +26,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <ctype.h>
 #include <time.h>
 #include <paths.h>
 #include <errno.h>
 #include <err.h>
+#include <stdbool.h>
 
 void
 logprint(const char *fmt, ...)
@@ -91,3 +93,30 @@ devpath(const char *dev)
 		(void)snprintf(path, len - 1, "%s%s", _PATH_DEV, dev);
 	return (path);
 }
+
+bool
+get_ugen_bus_and_addr(const char *ugen, int *bus, int *addr)
+{
+	int  n;
+	char num[4];
+
+	if (strncmp(ugen, "ugen", 4) != 0)
+		return (false);
+	ugen += 4;
+	for (n = 0; n < 4 && isdigit(*ugen);)
+		num[n++] = *ugen++;
+	if (*ugen++ != '.')
+		return (false);
+	num[n] = '\0';
+	*bus = strtol(num, NULL, 10);
+
+	for (n = 0; n < 3 && isdigit(*ugen);)
+		num[n++] = *ugen++;
+	if (*ugen != '\0')
+		return (false);
+	num[n] = '\0';
+	*addr = strtol(num, NULL, 10);
+	
+	return (true);
+}
+
