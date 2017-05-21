@@ -52,6 +52,7 @@ dsbcfg_vardef_t vardefs[] = {
 	{ "poll_exceptions",    DSBCFG_VAR_STRINGS, CFG_POLL_EXCEPTIONS  },
 	{ "allow_users",        DSBCFG_VAR_STRINGS, CFG_ALLOW_USERS	 },
 	{ "allow_groups",       DSBCFG_VAR_STRINGS, CFG_ALLOW_GROUPS	 },
-	{ "usermount",		DSBCFG_VAR_BOOLEAN, CFG_USERMOUNT	 }
+	{ "usermount",		DSBCFG_VAR_BOOLEAN, CFG_USERMOUNT	 },
+	{ "preload_kmods",      DSBCFG_VAR_STRINGS, CFG_PRELOAD_KMODS	 }
 };
 

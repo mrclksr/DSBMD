@@ -212,9 +212,6 @@ struct command_s {
 	{ "size",	&cmd_size    }
 };
 
-const char *kmods[] = { "ufs", "msdosfs", "ext2fs", "fuse", "geom_linux_lvm" };
-#define NKMODS (sizeof(kmods) / sizeof(char *))
-
 static int	nclients = 0;		/* # of connected clients. */
 static int	ndevs  = 0;		/* # of devs. */
 static int	queuesz  = 0;		/* # of devices in poll queue. */
@@ -311,6 +308,17 @@ main(int argc, char *argv[])
 	}
 	endgrent();
 	allow_gids[i] = (gid_t)-1;
+
+	/*
+	 * Preload the given filesystem kmods.
+	 */
+	for (i = 0, v = dsbcfg_getval(cfg, CFG_PRELOAD_KMODS).strings;
+	    v != NULL && *v != NULL; v++, i++) {
+		if (modfind(*v) == -1 && errno == ENOENT) {
+			if (kldload(*v) == -1 && errno != EEXIST)
+				logprint("kldload(%s)", *v);
+		}
+	}
 
 	spoll = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer / 1000000;
 	upoll = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer % 1000000;
@@ -492,13 +500,6 @@ main(int argc, char *argv[])
 	FD_ZERO(&allset);
 	FD_SET(ls, &allset); FD_SET(fileno(s), &allset);
 
-	/* Load filesystem modules */
-	for (i = 0; i < NKMODS; i++) {
-		if (modfind(kmods[i]) == -1 && errno == ENOENT) {
-			if (kldload(kmods[i]) == -1 && errno != EEXIST)
-				logprint("kldload(%s)", kmods[i]);
-		}
-	}
 	/* Start thread that checks the mount table for changes. */
 	if (pthread_create(&thr, NULL, thr_check_mntbl, NULL) == 0)
 		(void)pthread_detach(thr);
