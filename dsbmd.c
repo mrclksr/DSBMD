@@ -228,9 +228,9 @@ static pthread_mutex_t dev_mtx;		/* Mutex for device list mods. */
 int
 main(int argc, char *argv[])
 {
-	int	       i, upoll, spoll, ls, sflags, maxfd, ch;
+	int	       i, spoll, ls, sflags, maxfd, ch;
 	DIR	       *dirp, *dirp2;
-	bool	       fflag;
+	bool	       fflag, polling;
 	FILE	       *s, *fp;
 	char	       lvmpath[512], *ev, **v;
 	time_t	       polltime;
@@ -320,10 +320,12 @@ main(int argc, char *argv[])
 				logprint("kldload(%s)", *v);
 		}
 	}
+	spoll = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 
-	spoll = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer / 1000000;
-	upoll = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer % 1000000;
-
+	if (spoll <= 0)
+		polling = false;
+	else
+		polling = true;
 	for (i = 0; i < NFSTYPES; i++) {
 		switch (fstype[i].id) {
 		case UFS:
@@ -508,21 +510,22 @@ main(int argc, char *argv[])
 	/* Main loop. */
 	for (polltime = 0;;) {
 		rset = allset;
-		tv.tv_sec = spoll; tv.tv_usec = upoll;
-
-		if (difftime(time(NULL), polltime) >= spoll)
+		tv.tv_sec = spoll; tv.tv_usec = 0;
+		if (polling && difftime(time(NULL), polltime) >= spoll)
 			polltime = do_poll();
-		switch (select(maxfd + 1, &rset, NULL, NULL, &tv)) {
+		switch (select(maxfd + 1, &rset, NULL, NULL,
+		    polling ? &tv : 0)) {
 		case -1:
 			if (errno == EINTR)
 				continue;
 			err(EXIT_FAILURE, "select()");
 			/* NOTREACHED */
 		case 0:
-			polltime = do_poll();
+			if (polling)
+				polltime = do_poll();
 			continue;
 		}
-		if (s != NULL && FD_ISSET(fileno(s), &rset)) {
+		if (FD_ISSET(fileno(s), &rset)) {
 			/* New devd event. */
 			while ((ev = read_devd_event(s)) != NULL)
 				process_devd_event(ev);
