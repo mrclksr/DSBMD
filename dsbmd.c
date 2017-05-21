@@ -113,6 +113,7 @@ static bool	is_mntpt(const char *);
 static bool	check_permission(uid_t, gid_t *);
 static bool	usermount_set(void);
 static FILE	*uconnect(const char *);
+static FILE	*devd_connect(void);
 static char	*read_devd_event(FILE *);
 static char	**extend_list(char **, int *, const char *);
 static char	*getmntpt(sdev_t *);
@@ -468,7 +469,7 @@ main(int argc, char *argv[])
 	if (chdir("/") == -1)
 		err(EXIT_FAILURE, "chdir(/)");
 	/* Connect to devd. */
-	if ((s = uconnect(PATH_DEVD_SOCKET)) == NULL)
+	if ((s = devd_connect()) == NULL)
 		err(EXIT_FAILURE, "Couldn't connect to %s", PATH_DEVD_SOCKET);
 	(void)pthread_mutex_init(&dev_mtx, NULL);
 	(void)pthread_mutex_init(&cli_mtx, NULL);
@@ -519,14 +520,6 @@ main(int argc, char *argv[])
 			/* NOTREACHED */
 		case 0:
 			polltime = do_poll();
-			if (s == NULL) {
-				/* Try to reconnect to devd */
-				if ((s = uconnect(PATH_DEVD_SOCKET)) != NULL) {
-					maxfd = fileno(s) > ls ? fileno(s) : \
-					    ls;
-					FD_SET(fileno(s), &allset);
-				}
-			}
 			continue;
 		}
 		if (s != NULL && FD_ISSET(fileno(s), &rset)) {
@@ -536,8 +529,17 @@ main(int argc, char *argv[])
 			if (feof(s)) {
 				/* Lost connection to devd. */
 				FD_CLR(fileno(s), &allset);
-				(void)fclose(s); s = NULL;
-				logprintx("Lost connection to devd");
+				(void)fclose(s);
+				logprintx("Lost connection to devd. " \
+				    "Reconnecting ...");
+				if ((s = devd_connect()) == NULL) {
+					logprintx("Connecting to devd " \
+					    "failed. Giving up.");
+					exit(EXIT_FAILURE);
+				}
+				maxfd = fileno(s) > ls ? fileno(s) : ls;
+				FD_SET(fileno(s), &allset);
+
 			}
 		} 
 		if (FD_ISSET(ls, &rset)) {
@@ -2685,6 +2687,19 @@ set_cdrspeed(client_t *cli, sdev_t *devp, int speed)
 	(void)close(fd);
 
 	return (error);
+}
+
+static FILE *
+devd_connect()
+{
+	int  i;
+	FILE *s;
+
+	for (i = 0, s = NULL; i < 30 && s == NULL; i++) {
+		if ((s = uconnect(PATH_DEVD_SOCKET)) == NULL)
+			(void)sleep(1);
+	}
+	return (s);
 }
 
 /* 
