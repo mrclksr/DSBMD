@@ -313,8 +313,8 @@ main(int argc, char *argv[])
 	/*
 	 * Preload the given filesystem kmods.
 	 */
-	for (i = 0, v = dsbcfg_getval(cfg, CFG_PRELOAD_KMODS).strings;
-	    v != NULL && *v != NULL; v++, i++) {
+	for (v = dsbcfg_getval(cfg, CFG_PRELOAD_KMODS).strings;
+	    v != NULL && *v != NULL; v++) {
 		if (modfind(*v) == -1 && errno == ENOENT) {
 			if (kldload(*v) == -1 && errno != EEXIST)
 				logprint("kldload(%s)", *v);
@@ -463,7 +463,7 @@ main(int argc, char *argv[])
 				add_device(lvmpath);
 			}
 			(void)closedir(dirp2);
-		} else
+		} else if (!S_ISDIR(sb.st_mode))
 			add_device(dp->d_name);
 	}
 
@@ -896,10 +896,8 @@ media_changed()
 	static int i = 0, error;
 
 	for (i = i >= queuesz ? 0 : i; i < queuesz; i++) {
-		if ((error = pthread_mutex_trylock(&pollqueue[i]->mtx)) != 0) {
-			i++;
-			return (NULL);
-		}
+		if ((error = pthread_mutex_trylock(&pollqueue[i]->mtx)) != 0)
+			continue;
 		if (has_media(pollqueue[i]->dev)) {
 			if (!pollqueue[i]->has_media) {
 				/* Media was inserted */
