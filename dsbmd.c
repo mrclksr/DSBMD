@@ -224,6 +224,7 @@ static client_t **clients   = NULL;	/* List of connected clients. */
 static dsbcfg_t *cfg	    = NULL;
 static pthread_mutex_t cli_mtx;		/* Mutex for client list mods. */
 static pthread_mutex_t dev_mtx;		/* Mutex for device list mods. */
+static pthread_mutex_t mntbl_mtx;	/* Mutex for sys. mount table. */
 
 int
 main(int argc, char *argv[])
@@ -473,8 +474,10 @@ main(int argc, char *argv[])
 	/* Connect to devd. */
 	if ((s = devd_connect()) == NULL)
 		err(EXIT_FAILURE, "Couldn't connect to %s", PATH_DEVD_SOCKET);
+
 	(void)pthread_mutex_init(&dev_mtx, NULL);
 	(void)pthread_mutex_init(&cli_mtx, NULL);
+	(void)pthread_mutex_init(&mntbl_mtx, NULL);
 
 	/* Open the listening socket for the clients. */
         (void)unlink(PATH_DSBMD_SOCKET);
@@ -2940,10 +2943,12 @@ cmd_eject(client_t *cli, char **argv)
 		(void)pthread_mutex_unlock(&dev_mtx);
 		return;
 	}
+	(void)pthread_mutex_lock(&mntbl_mtx);
 	(void)pthread_mutex_lock(&devp->mtx);
 	(void)eject_media(cli, devp, force);
 	(void)pthread_mutex_unlock(&devp->mtx);
 	(void)pthread_mutex_unlock(&dev_mtx);
+	(void)pthread_mutex_unlock(&mntbl_mtx);
 }
 
 static void
@@ -3050,10 +3055,12 @@ cmd_mount(client_t *cli, char **argv)
 		(void)pthread_mutex_unlock(&dev_mtx);
 		return;
 	}
+	(void)pthread_mutex_lock(&mntbl_mtx);
 	(void)pthread_mutex_lock(&devp->mtx);
 	(void)pthread_mutex_unlock(&dev_mtx);
 	(void)mount_device(cli, devp);
 	(void)pthread_mutex_unlock(&devp->mtx);
+	(void)pthread_mutex_unlock(&mntbl_mtx);
 }
 
 static void
@@ -3090,10 +3097,12 @@ cmd_unmount(client_t *cli, char **argv)
 	 */
 	mtx = devp->mtx;
 
+	(void)pthread_mutex_lock(&mntbl_mtx);
 	(void)pthread_mutex_lock(&mtx);
 	(void)unmount_device(cli, devp, force, false);
 	(void)pthread_mutex_unlock(&mtx);
 	(void)pthread_mutex_unlock(&dev_mtx);
+	(void)pthread_mutex_unlock(&mntbl_mtx);
 }
 
 static void
@@ -3110,8 +3119,10 @@ thr_check_mntbl(void *unused)
 {
 	int n;
 	struct statfs buf[MAXDEVS];
-
+	
 	for (;; usleep(MNTCHK_INTERVAL)) {
+		if (pthread_mutex_lock(&mntbl_mtx) != 0)
+			continue;
 		if ((n = getfsstat(buf, sizeof(buf), MNT_WAIT)) == -1) {
 			logprint("getfsstat()");
 			continue;
@@ -3121,6 +3132,7 @@ thr_check_mntbl(void *unused)
 		check_fuse_mount(buf, n);
 		check_fuse_unmount(buf, n);
 		(void)pthread_mutex_unlock(&dev_mtx);
+		(void)pthread_mutex_unlock(&mntbl_mtx);
 	}
 }
 
