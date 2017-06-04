@@ -3125,6 +3125,7 @@ thr_check_mntbl(void *unused)
 			continue;
 		if ((n = getfsstat(buf, sizeof(buf), MNT_WAIT)) == -1) {
 			logprint("getfsstat()");
+			(void)pthread_mutex_unlock(&mntbl_mtx);
 			continue;
 		}
 		(void)pthread_mutex_lock(&dev_mtx);
