@@ -108,6 +108,7 @@ static int	waitforbytes(int);
 static int	uconnect(const char *);
 static int	devd_connect(void);
 static int	send_string(int, const char *);
+static int	client_readln(client_t *cli, int *error);
 static bool	match_part_dev(const char *, size_t);
 static bool	has_media(const char *);
 static bool	is_parted(const char *);
@@ -153,7 +154,6 @@ static void	check_mntbl(struct statfs *sb, int nsb);
 static void	check_fuse_mount(struct statfs *sb, int nsb);
 static void	check_fuse_unmount(struct statfs *, int);
 static void	*thr_check_mntbl(void *);
-static size_t	client_readln(client_t *cli, int *error);
 static time_t	do_poll(void);
 static sdev_t	*add_device(const char *);
 static sdev_t	*add_ptp_device(const char *);
@@ -706,7 +706,7 @@ del_client(client_t *cli)
  * Return 0 if bytes could be read, but string is not complete, yet.
  * Return -1 if an error occured, or the connection was terminated.
  */
-static size_t 
+static int
 client_readln(client_t *cli, int *error)
 {
 	int    i, n;
