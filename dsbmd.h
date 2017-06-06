@@ -139,6 +139,7 @@ typedef struct sdev_s {
  */
 typedef struct client_s {
 	int    s;			  /* Client socket. */
+	int    id;			  /* Unique ID */
 	bool   overflow;		  /* Read command string too long */
 	char   buf[64];			  /* String buffer for commands. */
 	char   msg[128];		  /* Message buffer. */

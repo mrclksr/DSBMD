@@ -597,6 +597,7 @@ add_client(int socket)
 	uid_t	      uid;
 	gid_t	      gid, gids[24];
 	client_t      **cv, *cp;
+	static int    id = 1;
 	struct group  *grp;
 	struct passwd *pw;
 
@@ -640,6 +641,7 @@ add_client(int socket)
 		goto error;
 	(void)memcpy(cp->gids, gids, n * sizeof(gid_t));
 	cp->s	 = socket;
+	cp->id	 = id++;
 	cp->uid	 = uid;
 	cp->slen = cp->rd = 0;
 	cp->overflow = false;
@@ -741,8 +743,9 @@ client_readln(client_t *cli, int *error)
 				if (badchar) {
 					cliprint(cli, "E:code=%d\n",
 					    ERR_BAD_STRING);
-				} else if (cli->slen - 1  > 0)
-					return (cli->slen - 1);
+					badchar = false;
+				} else
+					return (1);
 			}
 		} else if (cli->rd == bufsz) {
 			/* Line too long. Ignore all bytes until next '\n'. */
@@ -2863,7 +2866,7 @@ cliprintbc(client_t *exclude, const char *fmt, ...)
 
 	saved_errno = errno;
 	for (i = 0; i < nclients; i++) {
-		if (exclude == clients[i])
+		if (exclude != NULL && exclude->id == clients[i]->id)
 			continue;
 		(void)pthread_mutex_lock(&clients[i]->mtx);
 		va_start(ap, fmt);
@@ -2991,6 +2994,10 @@ exec_cmd(client_t *cli, char *cmdstr)
 	char *p, *last, *argv[12];
 	struct command_s *cp;
 
+	if (strlen(cmdstr) == 0) {
+		/* Ignore empty strings */
+		return;
+	}
 	for (p = strtok_r(cmdstr, "\t\n\r ", &last), argc = 0;
 	    argc < sizeof(argv) / sizeof(char *) && p != NULL; argc++) {
 		argv[argc] = p;
