@@ -45,6 +45,9 @@
 
 #define PATH_DEVD_SOCKET	"/var/run/devd.pipe"
 
+#define SOCK_ERR_CONN_CLOSED	1
+#define SOCK_ERR_IO_ERROR	2
+
 #define SOCKET_MODE		(S_IRWXU | S_IRWXG | S_IRWXO)
 
 #define CMD_MOUNT		'M'
@@ -113,20 +116,20 @@ typedef struct iface_s {
  * Struct to manage storage devices
  */
 typedef struct sdev_s {
-	int		speed;
-	bool		mounted;
-	bool		has_media;
-	bool		polling;	  /* May be polled. */
-	bool		visible;	  /* Vsible to client? */
-	bool		ejectable;
-	char		*name;		  /* Volume ID */
-	char		*model;		  /* "<vendor> <product> <revision>" */
-	char		*glabel[NGLBLPRFX];/* GEOM labels. */
-	char		*dev;		  /* Path to special file */
-	char		*mntpt;		  /* Mountpoint */
-	char		*realdev;	  /* Actual device in case of LVM */
-	fs_t		*fs;		  /* Filesystem type */
-	const iface_t	*iface;		  /* Interface type */
+	int	      speed;
+	bool	      mounted;
+	bool	      has_media;
+	bool	      polling;		  /* May be polled. */
+	bool	      visible;		  /* Visible to client? */
+	bool	      ejectable;
+	char	      *name;		  /* Volume ID */
+	char	      *model;		  /* "<vendor> <product> <revision>" */
+	char	      *glabel[NGLBLPRFX]; /* GEOM labels. */
+	char	      *dev;		  /* Path to special file */
+	char	      *mntpt;		  /* Mountpoint */
+	char	      *realdev;		  /* Actual device in case of LVM */
+	fs_t	      *fs;		  /* Filesystem type */
+	const iface_t *iface;		  /* Interface type */
 	const storage_type_t *st;  	  /* Media/storage type */
 	pthread_mutex_t mtx;
 } sdev_t;
@@ -135,9 +138,14 @@ typedef struct sdev_s {
  * Struct to manage clients.
  */
 typedef struct client_s {
-	FILE  *s;			  /* Client socket. */
-	uid_t uid;			  /* Client UID. */
+	int    s;			  /* Client socket. */
+	bool   overflow;		  /* Read command string too long */
+	char   buf[64];			  /* String buffer for commands. */
+	char   msg[128];		  /* Message buffer. */
+	uid_t  uid;			  /* Client UID. */
 	gid_t *gids;			  /* Client GIDs. */
+	size_t rd;			  /* # of bytes in buffer */
+	size_t slen;			  /* Len. of string in buffer. */
 	pthread_mutex_t mtx;		  /* Mutex to synchronize messages. */
 } client_t;
 

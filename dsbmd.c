@@ -104,7 +104,10 @@ static int	extend_iovec(struct iovec **, int *, const char *,
 static int	eject_media(client_t *, sdev_t *, bool);
 static int	set_cdrspeed(client_t *, sdev_t *, int);
 static int	set_msdosfs_locale(const char *, struct iovec**, int *);
-static int	waitforbytes(FILE *);
+static int	waitforbytes(int);
+static int	uconnect(const char *);
+static int	devd_connect(void);
+static int	send_string(int, const char *);
 static bool	match_part_dev(const char *, size_t);
 static bool	has_media(const char *);
 static bool	is_parted(const char *);
@@ -112,9 +115,7 @@ static bool	is_mountable(const char *);
 static bool	is_mntpt(const char *);
 static bool	check_permission(uid_t, gid_t *);
 static bool	usermount_set(void);
-static FILE	*uconnect(const char *);
-static FILE	*devd_connect(void);
-static char	*read_devd_event(FILE *);
+static char	*read_devd_event(int, int *);
 static char	**extend_list(char **, int *, const char *);
 static char	*getmntpt(sdev_t *);
 static char	*get_cam_modelname(const char *);
@@ -152,6 +153,7 @@ static void	check_mntbl(struct statfs *sb, int nsb);
 static void	check_fuse_mount(struct statfs *sb, int nsb);
 static void	check_fuse_unmount(struct statfs *, int);
 static void	*thr_check_mntbl(void *);
+static size_t	client_readln(client_t *cli, int *error);
 static time_t	do_poll(void);
 static sdev_t	*add_device(const char *);
 static sdev_t	*add_ptp_device(const char *);
@@ -229,10 +231,10 @@ static pthread_mutex_t mntbl_mtx;	/* Mutex for sys. mount table. */
 int
 main(int argc, char *argv[])
 {
-	int	       i, spoll, ls, sflags, maxfd, ch;
+	int	       i, e, spoll, ls, sflags, maxfd, ch, devd_sock;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag, polling;
-	FILE	       *s, *fp;
+	FILE	       *fp;
 	char	       lvmpath[512], *ev, **v;
 	time_t	       polltime;
 	fd_set	       allset, rset;
@@ -472,7 +474,7 @@ main(int argc, char *argv[])
 	if (chdir("/") == -1)
 		err(EXIT_FAILURE, "chdir(/)");
 	/* Connect to devd. */
-	if ((s = devd_connect()) == NULL)
+	if ((devd_sock = devd_connect()) == -1)
 		err(EXIT_FAILURE, "Couldn't connect to %s", PATH_DEVD_SOCKET);
 
 	(void)pthread_mutex_init(&dev_mtx, NULL);
@@ -502,9 +504,9 @@ main(int argc, char *argv[])
 	sflags |= O_NONBLOCK;
 	if (fcntl(ls, F_SETFL, sflags) == -1)
 		err(EXIT_FAILURE, "fcntl()");
-	maxfd = fileno(s) > ls ? fileno(s) : ls;
+	maxfd = devd_sock > ls ? devd_sock : ls;
 	FD_ZERO(&allset);
-	FD_SET(ls, &allset); FD_SET(fileno(s), &allset);
+	FD_SET(ls, &allset); FD_SET(devd_sock, &allset);
 
 	/* Start thread that checks the mount table for changes. */
 	if (pthread_create(&thr, NULL, thr_check_mntbl, NULL) == 0)
@@ -528,25 +530,25 @@ main(int argc, char *argv[])
 				polltime = do_poll();
 			continue;
 		}
-		if (FD_ISSET(fileno(s), &rset)) {
+		if (FD_ISSET(devd_sock, &rset)) {
 			/* New devd event. */
-			while ((ev = read_devd_event(s)) != NULL)
+			while ((ev = read_devd_event(devd_sock, &e)) != NULL)
 				process_devd_event(ev);
-			if (feof(s)) {
+			if (e == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
-				FD_CLR(fileno(s), &allset);
-				(void)fclose(s);
+				FD_CLR(devd_sock, &allset);
+				(void)close(devd_sock);
 				logprintx("Lost connection to devd. " \
 				    "Reconnecting ...");
-				if ((s = devd_connect()) == NULL) {
+				if ((devd_sock = devd_connect()) == -1) {
 					logprintx("Connecting to devd " \
 					    "failed. Giving up.");
 					exit(EXIT_FAILURE);
 				}
-				maxfd = fileno(s) > ls ? fileno(s) : ls;
-				FD_SET(fileno(s), &allset);
-
-			}
+				maxfd = devd_sock > ls ? devd_sock : ls;
+				FD_SET(devd_sock, &allset);
+			} else if (e == SOCK_ERR_IO_ERROR)
+				err(EXIT_FAILURE, "read_devd_event()");
 		} 
 		if (FD_ISSET(ls, &rset)) {
 			/* A client has connected. */
@@ -591,7 +593,6 @@ static client_t *
 add_client(int socket)
 {
 	int	      n, saved_errno;
-	FILE	      *sp;
 	char	      **p;
 	uid_t	      uid;
 	gid_t	      gid, gids[24];
@@ -600,9 +601,6 @@ add_client(int socket)
 	struct passwd *pw;
 
 	cp = NULL; errno = 0;
-	if ((sp = fdopen(socket, "r+")) == NULL)
-		goto error;
-	(void)setvbuf(sp, NULL, _IOLBF, 0);
 	if (getpeereid(socket, &uid, &gid) == -1 ||
 	   (pw = getpwuid(uid)) == NULL)
 		goto error;
@@ -622,8 +620,12 @@ add_client(int socket)
 	endpwent();
 
 	if (!check_permission(uid, gids)) {
-		(void)fprintf(sp, "E:code=%d\n", ERR_PERMISSION_DENIED);
-		(void)fclose(sp);
+		char msg[64];
+
+		(void)snprintf(msg, sizeof(msg) - 1, "E:code=%d\n",
+		    ERR_PERMISSION_DENIED);
+		(void)send_string(socket, msg);
+		(void)close(socket);
 		logprintx("Client with UID %d rejected", uid);
 		return (NULL);
 	}
@@ -637,8 +639,10 @@ add_client(int socket)
 	if ((cp->gids = malloc((n + 1) * sizeof(gid_t))) == NULL)
 		goto error;
 	(void)memcpy(cp->gids, gids, n * sizeof(gid_t));
-	cp->s	= sp;
-	cp->uid	= uid;
+	cp->s	 = socket;
+	cp->uid	 = uid;
+	cp->slen = cp->rd = 0;
+	cp->overflow = false;
 	(void)pthread_mutex_init(&cp->mtx, NULL);
 
 	/* 
@@ -671,8 +675,7 @@ error:
 	if (cp != NULL)
 		free(cp->gids);
 	free(cp);
-	if (sp != NULL)
-		(void)fclose(sp);
+	(void)close(socket);
 	errno = saved_errno;
 	return (NULL);
 }
@@ -688,12 +691,80 @@ del_client(client_t *cli)
 		return;
 	logprintx("Client with UID %d disconnected", cli->uid);
 	(void)pthread_mutex_destroy(&cli->mtx);
-	(void)fclose(cli->s); free(cli->gids);
+	(void)close(cli->s); free(cli->gids);
 	free(cli);
 	
 	for (; i < nclients - 1; i++)
 		clients[i] = clients[i + 1];
 	nclients--;
+}
+
+/*
+ * Return a value > 0 if a newline terminated string is available.
+ * Return 0 if bytes could be read, but string is not complete, yet.
+ * Return -1 if an error occured, or the connection was terminated.
+ */
+static size_t 
+client_readln(client_t *cli, int *error)
+{
+	int    i, n;
+	bool   badchar;
+	size_t bufsz = sizeof(cli->buf) - 1;
+
+	*error = n = 0; badchar = false;
+	do {
+		cli->rd += n;
+		if (cli->slen > 0) {
+			(void)memmove(cli->buf, cli->buf + cli->slen,
+			    cli->rd - cli->slen);
+		}
+		cli->rd  -= cli->slen;
+		cli->slen = 0;
+		for (i = 0; i < cli->rd && cli->buf[i] != '\n'; i++)
+			;
+		if (i < cli->rd) {
+			cli->buf[i] = '\0';
+			cli->slen = i + 1;
+			if (cli->overflow) {
+				(void)memmove(cli->buf, cli->buf + cli->slen,
+				    cli->rd - cli->slen);
+				cli->rd  -= cli->slen;
+				cli->slen = 0;
+				cli->overflow = false;
+				cliprint(cli, "E:code=%d\n",
+				    ERR_STRING_TOO_LONG);
+			} else {
+				for (i = 0; i < cli->slen - 1; i++) {
+					if (!isprint(cli->buf[i]))
+						badchar = true;
+				}
+				if (badchar) {
+					cliprint(cli, "E:code=%d\n",
+					    ERR_BAD_STRING);
+				} else if (cli->slen - 1  > 0)
+					return (cli->slen - 1);
+			}
+		} else if (cli->rd == bufsz) {
+			/* Line too long. Ignore all bytes until next '\n'. */
+			cli->overflow = true; cli->rd = 0;
+		}
+	} while ((n = read(cli->s, cli->buf + cli->rd, bufsz - cli->rd)) > 0);
+
+	if (n == 0 || (n < 0 && errno == ECONNRESET)) {
+		/* Lost connection */
+		*error = SOCK_ERR_CONN_CLOSED;
+		return (-1);
+	} else {
+		/* n < 0 */
+		if (errno == EAGAIN || errno == EINTR) {
+			/* Just retry */
+			return (0);
+		} else
+			*error = SOCK_ERR_IO_ERROR;
+	}
+	cli->slen = cli->rd = 0;
+
+	return (-1);
 }
 
 static void
@@ -728,37 +799,57 @@ process_connreq(int ls)
 	(void)pthread_mutex_unlock(&cli_mtx);
 }
 
-static char *
-read_devd_event(FILE *fp)
-{
-	int	      c;
-	static char   *buf = NULL;
-	static size_t len, sz = 0;
 
-	if (buf == NULL) {
-		if ((buf = malloc(_POSIX2_LINE_MAX)) == NULL)
-			err(EXIT_FAILURE, "malloc()");
-		sz = _POSIX2_LINE_MAX;
+static char *
+read_devd_event(int s, int *error)
+{
+	int  i, n;
+	static char *lnbuf = NULL;
+	static int rd = 0, bufsz = 0, slen = 0;
+
+	if (lnbuf == NULL) {
+		if ((lnbuf = malloc(_POSIX2_LINE_MAX)) == NULL)
+			return (NULL);
+		bufsz = _POSIX2_LINE_MAX;
 	}
-	for (len = 0;;) {
-		if (sz - len - 1 <= 0) {
-			if ((buf = realloc(buf, sz + 64)) == NULL)
+
+	*error = n = 0;
+	do {
+		rd += n;
+		if (slen > 0)
+			(void)memmove(lnbuf, lnbuf + slen, rd - slen);
+		rd  -= slen;
+		slen = 0;
+		for (i = 0; i < rd && lnbuf[i] != '\n'; i++)
+			;
+		if (i < rd) {
+			lnbuf[i] = '\0'; slen = i + 1;
+			if (slen == bufsz)
+				slen = rd = 0;
+			return (lnbuf);
+		}
+		if (rd == bufsz - 1) {
+			lnbuf = realloc(lnbuf, bufsz + _POSIX2_LINE_MAX);
+			if (lnbuf == NULL)
 				err(EXIT_FAILURE, "realloc()");
-			sz += 64;
+			bufsz += 64;
 		}
-		if ((c = fgetc(fp)) == EOF) {
-			if (feof(fp) || errno == EAGAIN)
-				return (NULL);
-			else if (errno == EINTR)
-				continue;
-			else
-				err(EXIT_FAILURE, "fgetc()");
+	} while ((n = read(s, lnbuf + rd, bufsz - rd - 1)) > 0);
+
+	if (n < 0) {
+		if (errno == EAGAIN || errno == EINTR) {
+			/* Just retry */
+			return (NULL);
 		}
-		buf[len++] = c; buf[len] = '\0';
-		if (c == '\n')
-			return (buf);
 	}
-	/* NOTREACHED */
+	if (errno == 0 || errno == ECONNRESET)
+		*error = SOCK_ERR_CONN_CLOSED;
+	else
+		*error = SOCK_ERR_IO_ERROR;
+	/* Error or lost connection */
+	slen = rd = 0;
+
+	return (NULL);
 }
 
 static void
@@ -2693,44 +2784,59 @@ set_cdrspeed(client_t *cli, sdev_t *devp, int speed)
 	return (error);
 }
 
-static FILE *
+static int
 devd_connect()
 {
-	int  i;
-	FILE *s;
+	int  i, s;
 
-	for (i = 0, s = NULL; i < 30 && s == NULL; i++) {
-		if ((s = uconnect(PATH_DEVD_SOCKET)) == NULL)
+	for (i = 0, s = -1; i < 30 && s == -1; i++) {
+		if ((s = uconnect(PATH_DEVD_SOCKET)) == -1)
 			(void)sleep(1);
 	}
 	return (s);
 }
 
 /* 
- * Connect to a UNIX domain socket, and return a standard I/O file pointer
- * to it. 
+ * Connect to a UNIX domain socket.
+ * 
  */
-static FILE *
+static int
 uconnect(const char *path)
 {
-	int		   s;
-	FILE		  *sp;
+	int s;
 	struct sockaddr_un saddr;
 
 	if ((s = socket(PF_LOCAL, SOCK_STREAM, 0)) == -1)
-		return (NULL);
+		return (-1);
 	(void)memset(&saddr, (unsigned char)0, sizeof(saddr));
 	(void)snprintf(saddr.sun_path, sizeof(saddr.sun_path), "%s", path);
 	saddr.sun_family = AF_LOCAL;
 	if (connect(s, (struct sockaddr *)&saddr, sizeof(saddr)) == -1)
-		return (NULL);
-	if ((sp = fdopen(s, "r+")) == NULL)
-		return (NULL);
-	/* Make the stream line buffered, and the socket non-blocking. */
-	if (setvbuf(sp, NULL, _IOLBF, 0) == -1 ||
-	    fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK) == -1)
-		return (NULL);
-	return (sp);
+		return (-1);
+	if (fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK) == -1)
+		return (-1);
+	return (s);
+}
+
+static int
+send_string(int socket, const char *str)
+{
+	fd_set wrset;
+
+	FD_ZERO(&wrset); FD_SET(socket, &wrset);
+	while (select(socket + 1, 0, &wrset, 0, 0) == -1) {
+		if (errno != EINTR) {
+			logprint("select()");
+			return (-1);
+		}
+	}
+	while (write(socket, str, strlen(str)) == -1) {
+		if (errno != EINTR) {
+			logprint("write()");
+			return (-1);
+		}
+	}
+	return (0);
 }
 
 static void
@@ -2742,9 +2848,9 @@ cliprint(client_t *cli, const char *fmt, ...)
 	saved_errno = errno;
 	(void)pthread_mutex_lock(&cli->mtx);
 	va_start(ap, fmt);
-	(void)vfprintf(cli->s, fmt, ap);
-	(void)fputc('\n', cli->s);
-	(void)fflush(cli->s);
+	(void)vsnprintf(cli->msg, sizeof(cli->msg) - 2, fmt, ap);
+	(void)strcat(cli->msg, "\n");
+	(void)send_string(cli->s, cli->msg);
 	(void)pthread_mutex_unlock(&cli->mtx);
 	errno = saved_errno;
 }
@@ -2761,9 +2867,10 @@ cliprintbc(client_t *exclude, const char *fmt, ...)
 			continue;
 		(void)pthread_mutex_lock(&clients[i]->mtx);
 		va_start(ap, fmt);
-		(void)vfprintf(clients[i]->s, fmt, ap);
-		(void)fputc('\n', clients[i]->s);
-		(void)fflush(clients[i]->s);
+		(void)vsnprintf(clients[i]->msg, sizeof(clients[i]->msg) - 2,
+		    fmt, ap);
+		(void)strcat(clients[i]->msg, "\n");
+		(void)send_string(clients[i]->s, clients[i]->msg);
 		(void)pthread_mutex_unlock(&clients[i]->mtx);
 	}
 	errno = saved_errno;
@@ -2825,14 +2932,13 @@ notifybc(sdev_t *devp, bool add)
 }
 
 static int
-waitforbytes(FILE *s)
+waitforbytes(int s)
 {
 	int    n;
 	fd_set rset;
 
-	FD_ZERO(&rset);
-	FD_SET(fileno(s), &rset);
-	while ((n = select(fileno(s) + 1, &rset, 0, 0, 0)) < 0) {
+	FD_ZERO(&rset); FD_SET(s, &rset);
+	while ((n = select(s + 1, &rset, 0, 0, 0)) < 0) {
 		if (errno == EINTR)
 			continue;
 		else
@@ -2848,11 +2954,9 @@ waitforbytes(FILE *s)
 static void *
 serve_client(void *cp)
 {
-	int	 c, n, rd;
-	char	 buf[64];
-	bool	 badchar;
+	int	 n, error;
 	client_t *cli;
-
+	
 	cli = (client_t *)cp;
 	for (;;) {
 		(void)waitforbytes(cli->s);
@@ -2861,32 +2965,20 @@ serve_client(void *cp)
 		 * sizeof(buf), or if it contains unprintable bytes, read
 		 * until end of line, and send the client an error message.
 		 */
-		for (badchar = false, c = n = rd = 0; c != '\n'; rd++) {
-			if ((c = fgetc(cli->s)) == EOF) {
-				if (feof(cli->s)) {
-					/* Client disconnected. */
-					(void)pthread_mutex_lock(&cli_mtx);
-					del_client(cli);
-					(void)pthread_mutex_unlock(&cli_mtx);
-	
-					return (NULL);
-				} else if (errno == EAGAIN || errno == EINTR)
-					(void)waitforbytes(cli->s);
-				else
-					err(EXIT_FAILURE, "fgetc()");
-			}
-			if (n < sizeof(buf) - 1)
-				buf[n++] = c;
-			buf[n] = '\0';
-			if (c != '\n' && !isprint(c))
-				badchar = true;
-		}
-		if (badchar)
-			cliprint(cli, "E:code=%d\n", ERR_BAD_STRING);
-		else if (n != rd)
-			cliprint(cli, "E:code=%d\n", ERR_STRING_TOO_LONG);
-		else
-			exec_cmd(cli, buf);
+		while ((n = client_readln(cli, &error)) > 0)
+			exec_cmd(cli, cli->buf);
+		if (n == 0)
+			continue;
+		if (error == SOCK_ERR_IO_ERROR) {
+			logprint("client_readln() error. " \
+			    "Closing client connection");
+		} else if (error == 0)
+			continue;
+		/* Client disconnected or error. */
+		(void)pthread_mutex_lock(&cli_mtx);
+		del_client(cli);
+		(void)pthread_mutex_unlock(&cli_mtx);
+		return (NULL);
 	}
 	/* NOTREACHED */
 	return (NULL);
