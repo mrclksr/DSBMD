@@ -703,7 +703,7 @@ del_client(client_t *cli)
 
 /*
  * Return a value > 0 if a newline terminated string is available.
- * Return 0 if bytes could be read, but string is not complete, yet.
+ * Return 0 if there is no new line terminated string available.
  * Return -1 if an error occured, or the connection was terminated.
  */
 static int
@@ -714,45 +714,42 @@ client_readln(client_t *cli, int *error)
 	size_t bufsz = sizeof(cli->buf) - 1;
 
 	*error = n = 0; badchar = false;
-	do {
+	while (cli->slen > 0 ||
+	    ((n = read(cli->s, cli->buf + cli->rd, bufsz - cli->rd)) > 0)) {
 		cli->rd += n;
+
 		if (cli->slen > 0) {
 			(void)memmove(cli->buf, cli->buf + cli->slen,
 			    cli->rd - cli->slen);
 		}
 		cli->rd  -= cli->slen;
 		cli->slen = 0;
-		for (i = 0; i < cli->rd && cli->buf[i] != '\n'; i++)
-			;
+		for (i = 0; i < cli->rd && cli->buf[i] != '\n'; i++) {
+			if (!isprint(cli->buf[i]))
+				badchar = true;
+		}
 		if (i < cli->rd) {
 			cli->buf[i] = '\0';
 			cli->slen = i + 1;
-			if (cli->overflow) {
-				(void)memmove(cli->buf, cli->buf + cli->slen,
-				    cli->rd - cli->slen);
-				cli->rd  -= cli->slen;
-				cli->slen = 0;
-				cli->overflow = false;
-				cliprint(cli, "E:code=%d\n",
-				    ERR_STRING_TOO_LONG);
-			} else {
-				for (i = 0; i < cli->slen - 1; i++) {
-					if (!isprint(cli->buf[i]))
-						badchar = true;
+			if (cli->overflow || badchar) {
+				if (cli->overflow) {
+					cli->overflow = false;
+					cliprint(cli, "E:code=%d\n",
+					    ERR_STRING_TOO_LONG);
 				}
 				if (badchar) {
 					cliprint(cli, "E:code=%d\n",
 					    ERR_BAD_STRING);
 					badchar = false;
-				} else
-					return (1);
-			}
+				}
+			} else
+				return (1);
 		} else if (cli->rd == bufsz) {
 			/* Line too long. Ignore all bytes until next '\n'. */
 			cli->overflow = true; cli->rd = 0;
 		}
-	} while ((n = read(cli->s, cli->buf + cli->rd, bufsz - cli->rd)) > 0);
-
+		n = 0;
+	}
 	if (n == 0 || (n < 0 && errno == ECONNRESET)) {
 		/* Lost connection */
 		*error = SOCK_ERR_CONN_CLOSED;
