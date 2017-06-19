@@ -1,0 +1,266 @@
+.Dd $Mdocdate$
+.Dt DSBMD 7
+.Sh ABOUT
+.Nm DSBMD
+is a media/filesystem type detecting daemon for FreeBSD that allows
+clients to mount storage devices. It is configured to work out of the box.
+.Sh DESCRIPTION
+.Nm
+watches the mount table for changes, monitors
+.Xr devd 8
+events for new storage devices, polls CD/DVD drives and card readers for
+media change events, determines media types, volume names, and filesystem
+types. Mountable devices, changes in the mount table as well as device
+add/remove events and altered states of mountable devices are presented to
+clients. Clients can request
+.Nm
+to mount, unmount, and eject media, or set the CD/DVD reading speed.
+.Sh FEATURES
+Some features are:
+.Bl -bullet
+.It
+Client authentication is handled using UNIX domain-socket credentials.
+Authorization can be defined on a user and/or group basis.
+.It
+For each supported filesystem, mount flags or external mount commands can be
+defined.
+.It
+Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2fs, and exFAT.
+.It
+Mounts and unmounts not initiated though DSBMD are detected, and necessary
+action are taken.
+.It
+Simple plain text protocol. DSBMD can be used and debugged using Telnet
+(telnet -u /var/run/dsbmd.socket) or Netcat (nc -U /var/run/dsbmd.socket).
+.It
+Easy configuration through /usr/local/etc/dsbmd.conf
+.It
+Support for FUSE
+.It
+Support for memory disks (md)
+.It
+Support for Linux LVM logical volumes through geom_linux_lvm(4)
+.It
+Support for MTP devices
+.It
+Support for PTP devices
+.El
+.Sh INSTALLATION
+.Bd -literal -width indent
+# make install
+.Ed
+.Sh SETUP
+In order to start DSBMD at boot time, add the following line to your
+.Em /etc/rc.conf :
+.Bd -literal
+dsbmd_enable="YES"
+.Ed
+.Pp
+Depending on your needs, install the FreeBSD ports
+.Em fusefs-exfat , fusefs-gphotofs, fusefs-ntfs ,
+and
+.Em fusefs-simple-mtpfs .
+.Nm
+comes with predefined commands in
+.Em dsbmd.conf
+that use these ports to mount the corresponding filesystems.
+.Pp
+For further configuration, see
+.Em dsbmd.conf .
+.Sh FILES USED
+.Bl -tag
+.It Em /var/run/dsbmd.socket
+UNIX domain socket
+.It Em /usr/local/etc/dsbmd.conf
+Configuration file
+.It Em /var/log/dsbmd.log
+Logfile
+.El
+.Sh DSBMD PROTOCOL SPECIFICATION
+.Ss 1.0 CLIENT SIDE
+.Ss 1.1 CONNECTION
+If a client WITHOUT permission connects,
+.Nm
+sends an error message with code
+.Dv ERR_PERMISSION_DENIED (258) ,
+and terminates the connection.
+.Pp
+If a client WITH permission connects,
+.Nm
+sends a list of zero or more devices using device add messages
+(2.5.1). The list is terminated by sending a
+.Sq =
+on a line by itself.
+.Ss 1.2 COMMANDS
+.Ss General command format
+.Sy command
+.Bo option Bo Ar arg Bc Bc
+.Bo option Bo Ar arg Bc Bc ... <newline>
+.Pp
+.Nm
+sends a reply message for any sent known or unknown command. Between
+the transmission of the command and the reception of the command reply
+message, multiple information and/or device add/remove messages (2.1) can
+occur.
+.Pp
+.Nm
+processes each client's commands synchronously, that is, the commands
+will be processed in the same order as they where received. After a command's
+reply message was sent, the next command will be processed.
+.Nm
+supports the following commands:
+.Bl -tag
+.It Sy mount Ar <device name>
+Mount the given device.
+.It Sy unmount Bo Fl f Bc Ar <device name>
+If the
+.Fl f
+switch is specified, unmounting will be enforced.
+.It Sy eject Bo Fl f Bc Ar <device name>
+This command unmounts and ejects the inserted media. If the
+.Fl f
+switch is specified, unmounting and ejecting of the media will be enforced.
+.It Sy speed Ar <device name> Ar <speed>
+Sets the maximum reading speed of the CD/DVD device.
+.It Sy size Ar <device name>
+This command asks
+.Nm
+for the capacity of a disk.
+.Nm
+will return the total size in bytes, and if the device is mounted, it
+will also return the number of used and free bytes.
+.Ed
+.Sh 2.0 DAEMON SIDE
+.Ss 2.1 GENERAL DSBMD MESSAGE FORMAT
+<message type>:<keyword>=<value>:...:<keyword>=<value><newline>
+.Ss 2.2 DSBMD MESSAGE TYPES
+.Bl -column "Message type" "Meaning"
+.It Em Message type Ta Em Meaning 
+.It + Ta A device/media was added
+.It - Ta A device/media was removed
+.It M Ta A device/media was mounted
+.It U Ta A device/media was unmounted
+.It V Ta The reading speed of a CD/DVD was changed.
+.It E Ta Command failed.
+.It O Ta Command execution was successful.
+.It S Ta Shutdown
+.El
+.Ss 2.3 KEYWORDS AND VALUES
+.Bl -column "Keyword     " "Value"
+.It Em Keyword Ta Em Value
+.It command    Ta mount, unmount, speed, eject, size
+.It code       Ta An errno number (< 257) or a special error code (>= 257)
+.It dev        Ta Device name
+.It mntpt      Ta Mount point
+.It speed      Ta Max. CD/DVD reading speed.
+.It mediasize  Ta Total capacity in bytes of a media
+.It used       Ta Number of used bytes of a media
+.It free       Ta Number of free bytes of a media
+.It type       Ta Device/media type: HDD, AUDIOCD, DVD, VCD, USBDISK, SVCD,
+DATACD, MMC, MTP, PTP
+.It cmds       Ta A comma Pq Sq \&,
+separated list of supported device commands.
+.It mntcmderr  Ta Numerical return value of external mount command.
+.Ed
+.Ss 2.4 ERROR CODES
+.Bl -column "Code        " "Meaning"
+.It Em Code Ta Em Meaning
+.It 257 Ta Device already mounted
+.It 258 Ta Permission denied
+.It 259 Ta Device not mounted
+.It 260 Ta Device busy
+.It 261 Ta No such device
+.It 262 Ta Max. number of connections reached
+.It 263 Ta Not ejectable
+.It 264 Ta Unknown command
+.It 265 Ta Unknown option
+.It 266 Ta Syntax error
+.It 267 Ta No media
+.It 268 Ta Unknown filesystem
+.It 269 Ta Unknown error
+.It 270	Ta Mount command failed
+.It 271 Ta Invalid Argument
+.It 272	Ta Command string too long
+.It 273 Ta Invalid command string
+.Ed
+.Ss 2.5 DSBMD MESSAGES
+.Ss 2.5.0 BROADCAST MESSAGES
+.Ss Device added (+)
+.Bd -literal -offset indent
++:dev=<devname>:type=<devtype>:cmds=<command list>
+      [:volid=<volid>][:mntpt=<mounted on>][:speed=<speed>]
+.Ed
+.Ss Device removed (-)
+.Bd -literal -offset indent
+-:dev=<devname>
+.Ed
+.Ss Reading speed changed (V)
+If the speed of a CDROM device was changed, the following message will be
+sent to all connected clients, except for the client who sent the command.
+.Bd -literal -offset indent
+V:dev=<devname>:speed=<speed>
+.Ed
+.Ss Device mounted (M)
+If a device was mounted, the following message will be sent to all connected
+clients, exept for the client who sent the command.
+.Bd -literal -offset indent
+M:dev=<devname>:mntpt=<mounted on>
+.Ed
+.Ss Device unmounted (U)
+If a device was unmounted, the following message will be sent to all connected
+clients, except for the client who sent the command.
+.Bd -literal -offset indent
+U:dev=<devname>:mntpt=<mounted on>
+.Ed
+.Ss Daemon shutdown (S)
+If the daemon was terminated, it sends the following message to all connected
+clients:
+.Bd -literal -offset indent
+S
+.Ed
+.Ss 2.5.1 COMMAND REPLY MESSAGES
+.Ss Error message (E)
+.Bd -literal -offset indent
+E:code=<error code>[:command=<executed command>]
+.Ed
+.Ss Success message (O)
+.SS General format:
+.Bd -literal -offset indent
+O:command=<executed command>[:keyword=value] ...
+.Ed
+.Pp
+If a device was successfully mounted,
+.Nm
+replies with the following
+message:
+.Bd -literal -offset indent
+O:command=mount:dev=<devname>:mntpt=<mounted on>
+.Ed
+.Pp
+If a device was successfully unmounted,
+.Nm
+replies with the following
+message:
+.Bd -literal -offset indent
+O:command=unmount:dev=<devname>:mntpt=<mounted on>
+.Ed
+.Pp
+If the capacity of a disk device was requested,
+.Nm
+sends the following
+message:
+.Bd -literal -offset indent
+O:command=size:dev=<devname>:mediasize=<size>:used=<used>:free=<free>
+.Ed
+.Pp
+Where
+.Sq size
+is the storage capacity in bytes,
+.Sq used
+is the number of used and
+.Sq free
+is the number of free bytes. If the device/media is not mounted,
+.Sq free
+and
+.Sq used
+are 0.
