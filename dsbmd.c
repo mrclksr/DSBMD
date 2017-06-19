@@ -3217,19 +3217,21 @@ thr_check_mntbl(void *unused)
 	struct statfs buf[MAXDEVS];
 	
 	for (;; usleep(MNTCHK_INTERVAL)) {
-		if (pthread_mutex_lock(&mntbl_mtx) != 0)
+		(void)pthread_mutex_lock(&dev_mtx);
+		if (pthread_mutex_lock(&mntbl_mtx) != 0) {
+			(void)pthread_mutex_unlock(&dev_mtx);
 			continue;
+		}
 		if ((n = getfsstat(buf, sizeof(buf), MNT_WAIT)) == -1) {
 			logprint("getfsstat()");
 			(void)pthread_mutex_unlock(&mntbl_mtx);
 			continue;
 		}
-		(void)pthread_mutex_lock(&dev_mtx);
 		check_mntbl(buf, n);
 		check_fuse_mount(buf, n);
 		check_fuse_unmount(buf, n);
-		(void)pthread_mutex_unlock(&dev_mtx);
 		(void)pthread_mutex_unlock(&mntbl_mtx);
+		(void)pthread_mutex_unlock(&dev_mtx);
 	}
 }
 
