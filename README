@@ -45,6 +45,9 @@ FEATURES
 
      •   Support for PTP devices
 
+OPTIONS
+     -f      Run DSBMD in foreground.
+
 INSTALLATION
      # make install
 
