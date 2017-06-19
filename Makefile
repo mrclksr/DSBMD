@@ -44,6 +44,14 @@ install: ${PROGRAM} ${RCSCRIPT} ${CFGFILE}
 	-@mkdir ${DESTDIR}${DOCSDIR}
 	${BSD_INSTALL_DATA} ${DOCS} ${DESTDIR}${DOCSDIR}
 
+readme: readme.mdoc
+	mandoc -mdoc readme.mdoc | perl -e '  \
+	binmode STDIN,  qq(:encoding(UTF-8)); \
+	binmode STDOUT, qq(:encoding(UTF-8)); \
+	foreach (<STDIN>) { \
+		$$_ =~ s/(.)\x08\1/$$1/g; $$_ =~ s/_\x08(.)/$$1/g; print $$_ \
+	}' | sed '1,1d' > README
+
 clean:
 	-rm -f ${PROGRAM}
 	-rm -f ${RCSCRIPT}
