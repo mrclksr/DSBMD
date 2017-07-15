@@ -185,10 +185,7 @@ is_ntfs(FILE *fp)
 	/* The reserved fields from 0x0e - 0x15 must be 0 */
 	if (memcmp(&sector[0x0e], "\0\0\0\0\0\0\0", 7) != 0)
 		return (false);
-	/* Get sectors per cluster. Should be 1, 2, 4, or 8 */
 	spc = sector[0x0d];
-	if (spc != 1 && spc != 2 && spc != 4 && spc != 8)
-		return (false);
 	bps = le16dec(&sector[0x0b]);
 	mft = le64dec(&sector[0x30]);
 
