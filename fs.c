@@ -170,9 +170,10 @@ bbread(FILE *fp, long offs, size_t size)
 static bool
 is_ntfs(FILE *fp)
 {
+	int i;
 	uint8_t *sector, spc;
 	uint16_t bps;
-	uint64_t mft;
+	uint64_t mft[2];
 	
 	if ((sector = bbread(fp, 0, DFLTSBSZ)) == NULL)
 		return (false);
@@ -187,16 +188,18 @@ is_ntfs(FILE *fp)
 		return (false);
 	spc = sector[0x0d];
 	bps = le16dec(&sector[0x0b]);
-	mft = le64dec(&sector[0x30]);
 
-	/* Read MFT */
-	if ((sector = bbread(fp, bps * spc * mft, 512)) == NULL)
-		return (false);
-	if (strncmp((char *)sector, "FILE", 4) == 0)
-		return (true);
+	mft[0] = le64dec(&sector[0x30]);
+        mft[1] = le64dec(&sector[0x38]);
+	
+	for (i = 0; i < 2; i++) {
+		if ((sector = bbread(fp, bps * spc * mft[i], 512)) == NULL)
+			continue;
+		if (strncmp((char *)sector, "FILE", 4) == 0)
+			return (true);
+	}
 	return (false);
 }
-
 
 /*
  * FAT PROBING
