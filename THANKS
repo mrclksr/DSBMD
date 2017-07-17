@@ -1,5 +1,12 @@
-Special thanks goes to Gustau Pérez for pointing out problems, sending bug
-reports, sharing ideas, and for taking the time for testing.
+Special thanks goes to ...
 
-Special thanks goes to Peter TKATCHENKO for testing and pointing out problems.
+Gustau Pérez for pointing out problems, sending bug reports, sharing ideas, and
+for taking the time for testing.
+
+Peter TKATCHENKO for testing and pointing out problems.
+
+Peter Weissmann for testing and his detailed problem report regarding failed
+detection of a NTFS formatted device.
+
+Lancelot for patiently providing information, and testing.
 
