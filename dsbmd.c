@@ -1283,6 +1283,19 @@ usermount_set()
 static void
 switcheids(uid_t euid, gid_t egid)
 {
+	struct passwd *pw;
+
+	errno = 0;
+	if ((pw = getpwuid(euid)) == NULL) {
+		if (errno != 0)
+			logprint("getpwuid(%u)", euid);
+		else
+			logprintx("Couldn't find user with UID %u", euid);
+		return;
+	}
+	endpwent();
+	if (initgroups(pw->pw_name, pw->pw_gid) == -1)
+		err(EXIT_FAILURE, "initgroups()");
 	if (setegid(egid) == -1)
 		logprint("setegid(%u)", egid);
 	if (seteuid(euid) == -1)
@@ -1292,6 +1305,18 @@ switcheids(uid_t euid, gid_t egid)
 static void
 restoreids()
 {
+	struct passwd *pw;
+
+	errno = 0;
+	if ((pw = getpwuid(getuid())) == NULL) {
+		if (errno != 0)
+			logprint("getpwuid(%u)", getuid());
+		else
+			logprintx("Couldn't find user with UID %u", getuid());
+		exit(EXIT_FAILURE);
+	}
+	endpwent();
+	initgroups(pw->pw_name, getgid());
 	switcheids(getuid(), getgid());
 }
 
