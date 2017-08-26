@@ -49,7 +49,10 @@ OPTIONS
      -f      Run DSBMD in foreground.
 
 INSTALLATION
-     # make install
+     # git clone https://github.com/mrclksr/DSBMD.git
+     # git clone https://github.com/mrclksr/dsbcfg.git
+
+     # cd DSBMD && make install
 
 SETUP
      In order to start DSBMD at boot time, add the following line to your
@@ -233,4 +236,4 @@ DSBMD PROTOCOL SPECIFICATION
      used and ‘free’ is the number of free bytes. If the device/media is not
      mounted, ‘free’ and ‘used’ are 0.
 
-                                 June 19, 2017
+                                August 26, 2017
