@@ -93,7 +93,7 @@ static struct parser_s {
 void
 dsbcfg_printerr()
 {
-	int i;
+	unsigned int i;
 
 	if (_error.errcode == -1)
 		return;
@@ -128,7 +128,7 @@ dsbcfg_printerr()
 const char *
 dsbcfg_strerror()
 {
-	int	    i;
+	unsigned int i;
 	static char strbuf[1024 + sizeof(_error.prfx)], *p;
 	
 	p = strbuf; *p = '\0';
@@ -317,8 +317,16 @@ dsbcfg_read(const char *subdir, const char *file, dsbcfg_vardef_t *vardefs,
 		if (parse_line(ln, vardefs, nvardefs, cp->vars) == -1)
 			goto error;
 	}
-	if (ln == NULL) { 
-		close_cfg_file(); return (cfg);
+	if (ln == NULL) {
+		if (cfg == NULL) {
+			/* Empty config file. */
+			if ((cfg = new_config_node(nvardefs)) == NULL)
+				goto error;
+			if (var_set_defaults(cfg->vars, vardefs,
+			    nvardefs) == -1)
+				return (NULL);
+		}
+ 		close_cfg_file(); return (cfg);
 	}
 	for (; ln != NULL; ln = readln()) {
 		if (is_label(ln)) {

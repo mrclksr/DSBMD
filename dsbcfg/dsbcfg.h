@@ -24,12 +24,8 @@
 
 #ifndef _DSBCFG_H_
 #define _DSBCFG_H_
-#ifndef __cplusplus
-#include <stdbool.h>
-#else
-extern "C" {
-#endif
 
+#include <stdbool.h>
 #include <sys/types.h>
 
 #define PATH_DSB_CFG_DIR ".config/DSB"
@@ -89,7 +85,7 @@ typedef struct dsbcfg_s {
 
 #define DSBCFG_VAL(V)		(dsbcfg_val_t)V
 #define dsbcfg_getval(CFG, VID)	(CFG->vars[VID].val)
-
+__BEGIN_DECLS
 extern int	  dsbcfg_write(const char *, const char *, const dsbcfg_t *);
 extern int	  dsbcfg_setval(dsbcfg_t *, int, dsbcfg_val_t);
 extern void	  dsbcfg_free(dsbcfg_t *);
@@ -103,8 +99,6 @@ extern dsbcfg_t	  *dsbcfg_getnode(dsbcfg_t *, const char *);
 extern dsbcfg_t	  *dsbcfg_addnode(dsbcfg_t *, const char *, dsbcfg_vardef_t *,
 		   int);
 extern const char *dsbcfg_strerror(void);
-#ifdef __cplusplus
-}
-#endif  /* __cplusplus */
+__END_DECLS
 #endif	/* !_DSBCFG_H_ */
 
