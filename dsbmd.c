@@ -78,7 +78,7 @@
 #include "config.h"
 #include <sys/iconv.h>
 
-#define MAXDEVS		   64
+#define MAXDEVS		   128
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
 #define NDISK_TYPES	   (sizeof(disktypes) / sizeof(disktypes[0]))
