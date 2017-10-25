@@ -78,7 +78,6 @@
 #include "config.h"
 #include <sys/iconv.h>
 
-#define MAXDEVS		   128
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
 #define NDISK_TYPES	   (sizeof(disktypes) / sizeof(disktypes[0]))
@@ -3238,23 +3237,36 @@ cmd_quit(client_t *cli, char **argv)
 static void *
 thr_check_mntbl(void *unused)
 {
-	int n;
-	struct statfs buf[MAXDEVS];
-	
+	int    n;
+	size_t bufsz;
+	struct statfs *buf;
+
+	while ((n = getfsstat(NULL, 0, MNT_WAIT)) == -1)
+		(void)usleep(500000);
+	bufsz = (n + 8) * sizeof(struct statfs);
+	if ((buf = malloc(bufsz)) == NULL)
+		err(EXIT_FAILURE, "malloc()");
 	for (;; usleep(MNTCHK_INTERVAL)) {
 		(void)pthread_mutex_lock(&dev_mtx);
 		if (pthread_mutex_lock(&mntbl_mtx) != 0) {
 			(void)pthread_mutex_unlock(&dev_mtx);
 			continue;
 		}
-		if ((n = getfsstat(buf, sizeof(buf), MNT_WAIT)) == -1) {
+		if ((n = getfsstat(buf, bufsz, MNT_WAIT)) != -1) {
+			while (n * sizeof(struct statfs) >= bufsz) {
+				bufsz += 8 * sizeof(struct statfs);
+				if ((buf = realloc(buf, bufsz)) == NULL)
+					err(EXIT_FAILURE, "realloc()");
+				if ((n = getfsstat(buf, bufsz, MNT_WAIT)) == -1)
+					logprint("getfsstat()");
+			}
+		} else
 			logprint("getfsstat()");
-			(void)pthread_mutex_unlock(&mntbl_mtx);
-			continue;
+		if (n > 0) {
+			check_mntbl(buf, n);
+			check_fuse_mount(buf, n);
+			check_fuse_unmount(buf, n);
 		}
-		check_mntbl(buf, n);
-		check_fuse_mount(buf, n);
-		check_fuse_unmount(buf, n);
 		(void)pthread_mutex_unlock(&mntbl_mtx);
 		(void)pthread_mutex_unlock(&dev_mtx);
 	}
