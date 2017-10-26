@@ -3251,7 +3251,7 @@ thr_check_mntbl(void *unused)
 		(void)pthread_mutex_lock(&mntbl_mtx);
 
 		if ((n = getfsstat(buf, bufsz, MNT_WAIT)) != -1) {
-			while (n * sizeof(struct statfs) >= bufsz) {
+			while (n > 0 && n * sizeof(struct statfs) >= bufsz) {
 				bufsz += 8 * sizeof(struct statfs);
 				if ((buf = realloc(buf, bufsz)) == NULL)
 					err(EXIT_FAILURE, "realloc()");
