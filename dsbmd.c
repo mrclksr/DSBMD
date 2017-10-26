@@ -3246,12 +3246,10 @@ thr_check_mntbl(void *unused)
 	bufsz = (n + 8) * sizeof(struct statfs);
 	if ((buf = malloc(bufsz)) == NULL)
 		err(EXIT_FAILURE, "malloc()");
-	for (;; usleep(MNTCHK_INTERVAL)) {
+	for (;; (void)usleep(MNTCHK_INTERVAL)) {
 		(void)pthread_mutex_lock(&dev_mtx);
-		if (pthread_mutex_lock(&mntbl_mtx) != 0) {
-			(void)pthread_mutex_unlock(&dev_mtx);
-			continue;
-		}
+		(void)pthread_mutex_lock(&mntbl_mtx);
+
 		if ((n = getfsstat(buf, bufsz, MNT_WAIT)) != -1) {
 			while (n * sizeof(struct statfs) >= bufsz) {
 				bufsz += 8 * sizeof(struct statfs);
