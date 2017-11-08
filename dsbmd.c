@@ -335,56 +335,60 @@ main(int argc, char *argv[])
 			    CFG_UFS_OPTS).string;
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_UFS_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_UFS_MNTCMD_U).string;
 			break;
 		case CD9660:
 			fstype[i].uopts  = dsbcfg_getval(cfg,
 			    CFG_CD9660_OPTS).string;
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_CD9660_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_CD9660_MNTCMD_U).string;
 			break;
 		case MSDOSFS:
 			fstype[i].uopts  = dsbcfg_getval(cfg,
 			    CFG_MSDOSFS_OPTS).string;
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_MSDOSFS_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_MSDOSFS_MNTCMD_U).string;
 			break;
 		case NTFS:
 			fstype[i].uopts  = dsbcfg_getval(cfg,
 			    CFG_NTFS_OPTS).string;
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_NTFS_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_NTFS_MNTCMD_U).string;
 			break;
 		case EXT:
 			fstype[i].uopts  = dsbcfg_getval(cfg,
 			    CFG_EXT_OPTS).string;
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_EXT_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_EXT_MNTCMD_U).string;
 			break;
 		case EXFAT:
 			fstype[i].uopts  = dsbcfg_getval(cfg,
 			    CFG_EXFAT_OPTS).string;
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_EXFAT_MNTCMD).string;
-			break;
-		case REISERFS:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_REISERFS_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_REISERFS_MNTCMD).string;
-			break;
-		case XFS:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_XFS_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_XFS_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_EXFAT_MNTCMD_U).string;
 			break;
 		case MTPFS:
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_MTPFS_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_MTPFS_MNTCMD_U).string;
 			break;
 		case PTPFS:
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_PTPFS_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_PTPFS_MNTCMD_U).string;
 			break;
 		default:
 			/* Just to soothe clang. */
@@ -1424,7 +1428,7 @@ mount_device(client_t *cli, sdev_t *devp)
 	bool	    have_mntpt = false;
 	char	    mopts[512], romopts[512], num[12], *mntpath, *p, *q;
 	mode_t	    mode;
-	const char  *op;
+	const char  *op, *mntcmd;
 	struct stat sb;
 
 	if (!devp->has_media) {
@@ -1569,8 +1573,11 @@ mount_device(client_t *cli, sdev_t *devp)
 
 		/* Mount as user if "usermount" and vfs.usermount is set */
 		if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean &&
-		    usermount_set())
+		    usermount_set()) {
 			switcheids(cli->uid, cli->gids[0]);
+			mntcmd = devp->fs->mntcmd_u;
+		} else
+			mntcmd = devp->fs->mntcmd;
 		(void)snprintf(num, sizeof(num), "%u", cli->uid);
 		(void)setenv(ENV_UID, num, 1);
 		(void)snprintf(num, sizeof(num), "%u", cli->gids[0]);
@@ -1583,14 +1590,13 @@ mount_device(client_t *cli, sdev_t *devp)
 			(void)setenv(ENV_USB_PORT,
 			    ugen_to_gphoto_port(devbasename(devp->dev)), 1);		
 		}
-		if ((error = system(devp->fs->mntcmd)) == 0 &&
+		if ((error = system(mntcmd)) == 0 &&
 		    !is_mntpt(mntpath)) {
 			cliprint(cli, "E:command=mount:code=%d",
 			    ERR_UNKNOWN_ERROR);
 			logprintx("Command '%s' executed by UID %d returned " \
 			    "0, but the mount point %s could not be found " \
-			    "in the mount table", devp->fs->mntcmd, cli->uid,
-			    mntpath);
+			    "in the mount table", mntcmd, cli->uid, mntpath);
 			rmntpt(mntpath);
 			free(mntpath);
 		} else if (is_mntpt(mntpath)) {
@@ -1607,14 +1613,14 @@ mount_device(client_t *cli, sdev_t *devp)
 			    ERR_MNTCMD_FAILED, error);
 			if (errno != 0) {
 				logprint("Command %s executed by UID %d " \
-				    "failed with code %d", devp->fs->mntcmd,
-				    cli->uid, error);
+				    "failed with code %d", mntcmd, cli->uid,
+				    error);
 				rmntpt(mntpath);
 				free(mntpath);
 			} else {
 				logprintx("Command %s executed by UID %d " \
-                                    "failed with code %d", devp->fs->mntcmd,
-                                    cli->uid, error);
+                                    "failed with code %d", mntcmd, cli->uid,
+				    error);
 				rmntpt(mntpath);
 				free(mntpath);
 			}
