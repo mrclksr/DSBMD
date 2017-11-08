@@ -1293,8 +1293,10 @@ switcheids(uid_t euid, gid_t egid)
 		return;
 	}
 	endpwent();
-	if (initgroups(pw->pw_name, pw->pw_gid) == -1)
-		err(EXIT_FAILURE, "initgroups()");
+	if (geteuid() == 0) {
+		if (initgroups(pw->pw_name, pw->pw_gid) == -1)
+			err(EXIT_FAILURE, "initgroups()");
+	}
 	if (setegid(egid) == -1)
 		logprint("setegid(%u)", egid);
 	if (seteuid(euid) == -1)
@@ -1315,7 +1317,6 @@ restoreids()
 		exit(EXIT_FAILURE);
 	}
 	endpwent();
-	initgroups(pw->pw_name, getgid());
 	switcheids(getuid(), getgid());
 }
 
