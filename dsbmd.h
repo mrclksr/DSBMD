@@ -129,6 +129,8 @@ typedef struct sdev_s {
 	char	      *mntpt;		  /* Mountpoint */
 	char	      *realdev;		  /* Actual device in case of LVM */
 	fs_t	      *fs;		  /* Filesystem type */
+	uid_t	      owner;		  /* UID of device's owner. */
+	gid_t	      group;		  /* GID of device. */
 	const iface_t *iface;		  /* Interface type */
 	const storage_type_t *st;  	  /* Media/storage type */
 	pthread_mutex_t mtx;
