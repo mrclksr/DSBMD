@@ -91,6 +91,8 @@
 #define USB_SUBCLASS_PTP   0x01
 #define USB_PROTOCOL_PTP   0x01
 
+static int	change_owner(sdev_t *, uid_t);
+static int	devstat(const char *, struct stat *);
 static int	get_ugen_type(const char *);
 static int	get_optical_disk_type(const char *);
 static int	get_da_storage_type(const char *);
@@ -1325,6 +1327,19 @@ restoreids()
 }
 
 static int
+change_owner(sdev_t *dev, uid_t owner)
+{
+	char *path;
+
+	path = dev->iface->type == IF_TYPE_LVM ? dev->realdev : dev->dev;
+	if (chown(path, owner, dev->group) == -1) {
+		logprint("chown(%s)", path);
+		return (-1);
+	}
+	return (0);
+}
+
+static int
 set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 {
 	const char *cs;
@@ -1564,6 +1579,16 @@ mount_device(client_t *cli, sdev_t *devp)
 	}
 	if (chown(mntpath, cli->uid, cli->gids[0]) == -1)
 		err(EXIT_FAILURE, "chown(%s)", mntpath);
+	if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set()) {
+		/*
+		 * Change the owner of the device so that the user
+		 * can mount it.
+		 */
+		if (change_owner(devp, cli->uid) == -1) {
+			cliprint(cli, "E:command=mount:code=%d", errno);
+			return (-1);
+		}
+	}
 	errno = 0;
 
 	if (devp->fs->mntcmd != NULL) {
@@ -1597,6 +1622,7 @@ mount_device(client_t *cli, sdev_t *devp)
 			logprintx("Command '%s' executed by UID %d returned " \
 			    "0, but the mount point %s could not be found " \
 			    "in the mount table", mntcmd, cli->uid, mntpath);
+			(void)change_owner(devp, devp->owner);
 			rmntpt(mntpath);
 			free(mntpath);
 		} else if (is_mntpt(mntpath)) {
@@ -1624,6 +1650,7 @@ mount_device(client_t *cli, sdev_t *devp)
 				rmntpt(mntpath);
 				free(mntpath);
 			}
+			(void)change_owner(devp, devp->owner);
 		}
 		restoreids();
 		return (error);
@@ -1646,7 +1673,7 @@ mount_device(client_t *cli, sdev_t *devp)
 	}
 	cliprint(cli, "E:command=mount:code=%d", errno);
 	logprint("Mounting of %s by UID %d failed", devp->dev, cli->uid);
-
+	(void)change_owner(devp, devp->owner);
 	rmntpt(mntpath);
 	free(mntpath);
 
@@ -1714,6 +1741,7 @@ unmount_device(client_t *cli, sdev_t *devp, bool force, bool eject)
 	rmntpt(devp->mntpt);
 	free(devp->mntpt); devp->mntpt = NULL;
 	devp->mounted = false;
+	(void)change_owner(devp, devp->owner);
 	if (devp->iface->type == IF_TYPE_FUSE) {
 		if (pthread_mutex_lock(&devp->mtx) == 0 || errno != EINVAL)
 			del_device(devp);
@@ -2031,6 +2059,19 @@ iface_from_name(const char *name)
         return (NULL);
 }
 
+static int
+devstat(const char *dev, struct stat *sb)
+{
+	char *path;
+
+	path = devpath(dev);
+	if (stat(path, sb) == -1) {
+		logprint("stat(%s)", path);
+		return (-1);
+	}
+	return (0);
+}
+
 static const storage_type_t *
 get_storage_type(const char *devname)
 {
@@ -2115,9 +2156,10 @@ get_da_storage_type(const char *devname)
 static sdev_t *
 add_ptp_device(const char *ugen)
 {
-	int	   i, len;
-	sdev_t	   *devp;
-	const char *dev;
+	int	    i, len;
+	sdev_t	    *devp;
+	const char  *dev;
+	struct stat sb;
 
 	dev = devbasename(ugen);
 	/* Check if we already have this device. */
@@ -2128,6 +2170,8 @@ add_ptp_device(const char *ugen)
 			return (NULL);
 		}
 	}
+	if (devstat(ugen, &sb) == -1)
+		return (NULL);
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
 		err(EXIT_FAILURE, "malloc()");
 	if ((devp->dev = strdup(devpath(dev))) == NULL)
@@ -2145,6 +2189,8 @@ add_ptp_device(const char *ugen)
 			err(EXIT_FAILURE, "malloc()");
 		(void)sprintf(devp->name, "Camera (%s)", dev);
 	}
+	devp->owner	= sb.st_uid;
+	devp->group	= sb.st_gid;
 	devp->st	= st_from_type(ST_PTP);
 	devp->iface	= iface_from_name(dev);
 	devp->glabel[0] = NULL;
@@ -2170,10 +2216,11 @@ add_ptp_device(const char *ugen)
 static sdev_t *
 add_mtp_device(const char *ugen)
 {
-	int	   i, len;
-	sdev_t	   *devp;
-	const char *dev;
-	
+	int	    i, len;
+	sdev_t	    *devp;
+	const char  *dev;
+	struct stat sb;
+
 	dev = devbasename(ugen);
 	/* Check if we already have this device. */
 	len = strlen(dev);
@@ -2183,6 +2230,8 @@ add_mtp_device(const char *ugen)
 			return (NULL);
 		}
 	}
+	if (devstat(ugen, &sb) == -1)
+		return (NULL);
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
 		err(EXIT_FAILURE, "malloc()");
 	if ((devp->dev = strdup(devpath(dev))) == NULL)
@@ -2201,6 +2250,8 @@ add_mtp_device(const char *ugen)
 			err(EXIT_FAILURE, "malloc()");
 		(void)sprintf(devp->name, "MTP device (%s)", dev);
 	}
+	devp->owner	= sb.st_uid;
+	devp->group	= sb.st_gid;
 	devp->st	= st_from_type(ST_MTP);
 	devp->iface	= iface_from_name(dev);
 	devp->glabel[0] = NULL;
@@ -2270,10 +2321,11 @@ add_fuse_device(const char *mntpt)
 static sdev_t *
 add_device(const char *devname)
 {
-	int	   len, i, j, speed, fd;
-	char	   **v, *path, *realdev;
-	sdev_t	   *devp, dev = { 0 };
-	const char *p;
+	int	    len, i, j, speed, fd;
+	char	    **v, *path, *realdev;
+	sdev_t	    *devp, dev = { 0 };
+	const char  *p;
+	struct stat sb;
 
 	devname = devbasename(devname);
 
@@ -2290,19 +2342,22 @@ add_device(const char *devname)
 	dev.st = get_storage_type(devname);
 	if (dev.st == NULL && dev.iface->type != IF_TYPE_CD)
 		return (NULL);
-	if (dev.iface->type == IF_TYPE_LVM) {
-		realdev = get_lvm_dev(devname);
-		if (realdev == NULL)
-			return (NULL);
-		if ((dev.realdev = strdup(realdev)) == NULL)
-			err(EXIT_FAILURE, "strdup()");
-	}
 	if (dev.st != NULL) {
 		if (dev.st->type == ST_MTP)
 			return (add_mtp_device(devname));
 		else if (dev.st->type == ST_PTP)
 			return (add_ptp_device(devname));
 	}
+	if (dev.iface->type == IF_TYPE_LVM) {
+		realdev = get_lvm_dev(devname);
+		if (realdev == NULL)
+			return (NULL);
+		if ((dev.realdev = strdup(realdev)) == NULL)
+			err(EXIT_FAILURE, "strdup()");
+		if (devstat(realdev, &sb) == -1)
+			return (NULL);
+	} else if (devstat(devname, &sb) == -1)
+		return (NULL);
 	if (!is_mountable(devname))
 		return (NULL);
 	if (dev.iface->type == IF_TYPE_CD) {
@@ -2311,7 +2366,9 @@ add_device(const char *devname)
 		if (strchr("abcdefgh", *p) != NULL)
 			return (NULL);
 	}
+	/* Get full path to device */
 	path = devpath(devname);
+
 	if ((dev.has_media = has_media(path)))
 		dev.fs = getfs(path);
 	else
@@ -2352,7 +2409,9 @@ add_device(const char *devname)
 	}
 	/* Terminate glabel list. */
 	devp->glabel[j]	= NULL;
-	
+
+	devp->owner	= sb.st_uid;
+	devp->group	= sb.st_gid;
 	devp->st	= dev.st;
 	devp->iface     = dev.iface;
 	devp->fs	= dev.fs;
@@ -3412,6 +3471,8 @@ check_mntbl(struct statfs *sb, int nsb)
 			/* Unmounted */
 			cliprintbc(NULL, "U:dev=%s:mntpt=%s",
 			    dp->dev, dp->mntpt);
+			/* Restore ownership in case we changed it. */
+			(void)change_owner(dp, dp->owner);
 			free(dp->mntpt);
 			dp->mntpt   = NULL;
 			dp->mounted = false;
