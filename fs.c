@@ -238,11 +238,6 @@ is_fat(FILE *fp)
 	/* Get bytes per sector */
 	bps = le16dec(&sector[0x0b]);
 
-	/* Check if OEM label exists. */
-	for (i = 0; i < 8; i++) {
-		if (!isprint(sector[0x03 + i]))
-			return (false);
-	}
 	/* Check for number of clusters: 1, 2, 4, 8, ..., or 128 */
 	for (i = 0; i < 8 && sector[0x0d] != (1 << i); i++)
 		;
