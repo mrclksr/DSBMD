@@ -3450,6 +3450,7 @@ check_mntbl(struct statfs *sb, int nsb)
 			} else if (dp->mounted &&
 			    strcmp(dp->mntpt, mntpt) != 0) {
 				/* Remounted */
+				rmntpt(dp->mntpt);
 				cliprintbc(NULL,
 				    "U:dev=%s:mntpt=%s",
 				    dp->dev, dp->mntpt);
@@ -3469,6 +3470,7 @@ check_mntbl(struct statfs *sb, int nsb)
 				}
 			}	
 			/* Unmounted */
+			rmntpt(dp->mntpt);
 			cliprintbc(NULL, "U:dev=%s:mntpt=%s",
 			    dp->dev, dp->mntpt);
 			/* Restore ownership in case we changed it. */
