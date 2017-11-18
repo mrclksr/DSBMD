@@ -959,18 +959,25 @@ static bool
 has_media(const char *dev)
 {
 	int    fd;
+	char   buf[16 * 1024];
+	bool   media;
 	off_t  size;
 	size_t blksz;
-
+	
 	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
 		return (false);
 	size  = g_mediasize(fd);
 	blksz = g_sectorsize(fd);
-	(void)close(fd);
 	errno = 0;
 	if ((int)size == -blksz || (int)size == -1)
-		return (false);
-	return (true);
+		media = false;
+	else if (read(fd, buf, blksz > sizeof(buf) ? sizeof(buf) : blksz) == -1)
+		media = false;
+	else
+		media = true;
+	(void)close(fd);
+
+	return (media);
 }
 
 static time_t
@@ -1072,6 +1079,26 @@ update_device(sdev_t *devp)
 			notifybc(devp, false);
 			devp->fs = NULL;
 			(void)pthread_mutex_unlock(&devp->mtx);
+			if (getmntpt(devp) != NULL) {
+				/*
+				 * Device was ejected without unmounting it
+				 * first.
+				 * Unmount device and remove mount point.
+				 */
+				(void)pthread_mutex_lock(&dev_mtx);
+				(void)pthread_mutex_lock(&mntbl_mtx);
+				pthread_mutex_lock(&devp->mtx);
+				(void)unmount(devp->mntpt, MNT_FORCE);
+				rmntpt(devp->mntpt);
+				free(devp->mntpt);
+				devp->mntpt   = NULL;
+				devp->mounted = false;
+				/* Restore ownership in case we changed it. */
+				(void)change_owner(devp, devp->owner);
+				pthread_mutex_unlock(&devp->mtx);
+				(void)pthread_mutex_unlock(&mntbl_mtx);
+				(void)pthread_mutex_unlock(&dev_mtx);
+			}
 		} else {
 			if (devp->st == NULL) {
 				(void)pthread_mutex_unlock(&devp->mtx);
