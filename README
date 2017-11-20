@@ -49,16 +49,21 @@ OPTIONS
      -f      Run DSBMD in foreground.
 
 INSTALLATION
-     # git clone https://github.com/mrclksr/DSBMD.git
-     # git clone https://github.com/mrclksr/dsbcfg.git
+           # git clone https://github.com/mrclksr/DSBMD.git
+           # git clone https://github.com/mrclksr/dsbcfg.git
 
-     # cd DSBMD && make install
+           # cd DSBMD && make install
+
+WARNING
+     Running DSBMD together with hald is not recommended. Since both daemons
+     access the same system resources and execute similar actions, this might
+     lead to malfunction.
 
 SETUP
      In order to start DSBMD at boot time, add the following line to your
      /etc/rc.conf:
 
-     dsbmd_enable="YES"
+           dsbmd_enable="YES"
 
      Depending on your needs, install the FreeBSD ports fusefs-exfat,
      fusefs-gphotofs, fusefs-ntfs, and fusefs-simple-mtpfs.  DSBMD comes with
@@ -66,6 +71,35 @@ SETUP
      corresponding filesystems.
 
      For further configuration, see dsbmd.conf.
+
+   Mounting as regular user
+     If you want DSBMD to mount storage devices as regular user who initiated
+     the mount command, set
+
+           usermount = true
+
+     in dsbmd.conf and set the sysctl variable vfs.usermount to 1:
+
+           sysctl vfs.usermount=1
+
+     To make this setting permanent, add
+
+           vfs.usermount=1
+
+     to /etc/sysctl.conf
+
+   Automount
+     Configure DSBMD for mounting as regular user (see above). This will allow
+     you to unmount automounted media without special privileges. Install
+     sysutils/dsbmc-cli and start
+
+           dsbmc-cli -a
+
+     manually as regular user, or add the command
+
+           dsbmc-cli -a&
+
+     to your window manager's autostart file.
 
 FILES USED
      /var/run/dsbmd.socket
@@ -236,4 +270,4 @@ DSBMD PROTOCOL SPECIFICATION
      used and ‘free’ is the number of free bytes. If the device/media is not
      mounted, ‘free’ and ‘used’ are 0.
 
-                                August 26, 2017
+                               November 20, 2017
