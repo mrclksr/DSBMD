@@ -1085,7 +1085,6 @@ update_device(sdev_t *devp)
 				 * first.
 				 * Unmount device and remove mount point.
 				 */
-				(void)pthread_mutex_lock(&dev_mtx);
 				(void)pthread_mutex_lock(&mntbl_mtx);
 				pthread_mutex_lock(&devp->mtx);
 				(void)unmount(devp->mntpt, MNT_FORCE);
@@ -1097,7 +1096,6 @@ update_device(sdev_t *devp)
 				(void)change_owner(devp, devp->owner);
 				pthread_mutex_unlock(&devp->mtx);
 				(void)pthread_mutex_unlock(&mntbl_mtx);
-				(void)pthread_mutex_unlock(&dev_mtx);
 			}
 		} else {
 			if (devp->st == NULL) {
