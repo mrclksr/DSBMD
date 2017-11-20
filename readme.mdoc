@@ -52,16 +52,23 @@ Run
 .Nm
 in foreground. 
 .Sh INSTALLATION
-.Bd -literal -width indent
+.Bd -literal -offset indent
 # git clone https://github.com/mrclksr/DSBMD.git
 # git clone https://github.com/mrclksr/dsbcfg.git
 
 # cd DSBMD && make install
 .Ed
+.Sh WARNING
+Running
+.Nm
+together with
+.Em hald
+is not recommended. Since both daemons access the same system resources and
+execute similar actions, this might lead to malfunction.
 .Sh SETUP
 In order to start DSBMD at boot time, add the following line to your
 .Em /etc/rc.conf :
-.Bd -literal
+.Bd -literal -offset indent
 dsbmd_enable="YES"
 .Ed
 .Pp
@@ -76,6 +83,51 @@ that use these ports to mount the corresponding filesystems.
 .Pp
 For further configuration, see
 .Em dsbmd.conf .
+.Ss Mounting as regular user
+If you want
+.Nm
+to mount storage devices as regular user who initiated the
+mount command, set
+.Bd -literal -offset indent
+usermount = true
+.Ed
+.Pp
+in 
+.Em dsbmd.conf
+and set
+the
+.Em sysctl
+variable
+.Em vfs.usermount
+to 1:
+.Bd -literal -offset indent
+sysctl vfs.usermount=1
+.Ed
+.Pp
+To make this setting permanent, add
+.Bd -literal -offset indent
+vfs.usermount=1
+.Ed
+.Pp
+to
+.Em /etc/sysctl.conf
+.Ss Automount
+Configure
+.Nm
+for mounting as regular user (see above). This will allow you to unmount
+automounted media without special privileges. Install
+.Em sysutils/dsbmc-cli
+and start
+.Bd -literal -offset indent
+dsbmc-cli -a
+.Ed
+.Pp
+manually as regular user, or add the command
+.Bd -literal -offset indent
+dsbmc-cli -a&
+.Ed
+.Pp
+to your window manager's autostart file.
 .Sh FILES USED
 .Bl -tag
 .It Em /var/run/dsbmd.socket
