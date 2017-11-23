@@ -1395,10 +1395,9 @@ change_owner(sdev_t *dev, uid_t owner)
 static int
 ssystem(uid_t uid, const char *cmd)
 {
-	int	       status;
-	pid_t	       pid;
-	sigset_t       sigmask, savedmask;
-	struct passwd *pw;
+	int	 status;
+	pid_t	 pid;
+	sigset_t sigmask, savedmask;
 
 	errno = 0;
 	/* Block SIGCHLD */
