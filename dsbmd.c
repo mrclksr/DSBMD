@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <signal.h>
 #include <ctype.h>
 #include <limits.h>
 #include <pthread.h>
@@ -49,6 +50,7 @@
 #include <sys/param.h>
 #include <sys/linker.h>
 #include <sys/module.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <vm/vm_param.h>
@@ -92,6 +94,7 @@
 #define USB_PROTOCOL_PTP   0x01
 
 static int	change_owner(sdev_t *, uid_t);
+static int	ssystem(uid_t, gid_t, const char *);
 static int	devstat(const char *, struct stat *);
 static int	get_ugen_type(const char *);
 static int	get_optical_disk_type(const char *);
@@ -1385,6 +1388,60 @@ change_owner(sdev_t *dev, uid_t owner)
 }
 
 static int
+ssystem(uid_t uid, gid_t gid, const char *cmd)
+{
+	int	       status;
+	pid_t	       pid;
+	sigset_t       sigmask, savedmask;
+	struct passwd *pw;
+
+	errno = 0;
+	if ((pw = getpwuid(uid)) == NULL) {
+		if (errno != 0)
+			logprint("getpwuid(%u)", uid);
+		else
+			logprintx("Couldn't find user with UID %u", uid);
+		return (-1);
+	}
+	endpwent();
+
+	/* Block SIGCHLD */
+	(void)sigemptyset(&sigmask); (void)sigaddset(&sigmask, SIGCHLD);
+	(void)sigprocmask(SIG_BLOCK, &sigmask, &savedmask);
+
+	switch ((pid = vfork())) {
+	case -1:
+		err(EXIT_FAILURE, "vfork()");
+		/* NOTREACHED */
+	case  0:
+		if (initgroups(pw->pw_name, pw->pw_gid) == -1) {
+			logprint("initgroups()");
+			_exit(255);
+		}
+		if (setgid(pw->pw_gid) == -1)
+			logprint("setgid(%d)", pw->pw_gid);
+		if (setuid(uid) == -1) {
+			logprint("setuid(%d)", uid);
+			_exit(255);
+		}
+		/* Restore old signal mask */
+		(void)sigprocmask(SIG_SETMASK, &savedmask, NULL);
+		execl(_PATH_BSHELL, _PATH_BSHELL, "-c", cmd, NULL);
+		_exit(255);
+		/* NOTREACHED */
+	default:
+		/* Restore old signal mask */
+		(void)sigprocmask(SIG_SETMASK, &savedmask, NULL);
+		break;
+	}
+	while (waitpid(pid, &status, WEXITED) == (pid_t)-1 && errno == EINTR)
+		errno = 0;
+	if (errno != 0)
+		return (-1);
+	return (status == 255 ? -1 : status);
+}
+
+static int
 set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 {
 	const char *cs;
@@ -1487,6 +1544,8 @@ mount_device(client_t *cli, sdev_t *devp)
 	int	    error = 0, i, j, len;
 	bool	    have_mntpt = false;
 	char	    mopts[512], romopts[512], num[12], *mntpath, *p, *q;
+	uid_t	    uid;
+	gid_t	    gid;
 	mode_t	    mode;
 	const char  *op, *mntcmd;
 	struct stat sb;
@@ -1644,10 +1703,14 @@ mount_device(client_t *cli, sdev_t *devp)
 		/* Mount as user if "usermount" and vfs.usermount is set */
 		if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean &&
 		    usermount_set()) {
-			switcheids(cli->uid, cli->gids[0]);
+			uid = cli->uid;
+			gid = cli->gids[0];
 			mntcmd = devp->fs->mntcmd_u;
-		} else
+		} else {
+			uid = 0;
+			gid = 0;
 			mntcmd = devp->fs->mntcmd;
+		}
 		(void)snprintf(num, sizeof(num), "%u", cli->uid);
 		(void)setenv(ENV_UID, num, 1);
 		(void)snprintf(num, sizeof(num), "%u", cli->gids[0]);
@@ -1660,7 +1723,7 @@ mount_device(client_t *cli, sdev_t *devp)
 			(void)setenv(ENV_USB_PORT,
 			    ugen_to_gphoto_port(devbasename(devp->dev)), 1);		
 		}
-		if ((error = system(mntcmd)) == 0 &&
+		if ((error = ssystem(uid, gid, mntcmd)) == 0 &&
 		    !is_mntpt(mntpath)) {
 			cliprint(cli, "E:command=mount:code=%d",
 			    ERR_UNKNOWN_ERROR);
@@ -1697,7 +1760,6 @@ mount_device(client_t *cli, sdev_t *devp)
 			}
 			(void)change_owner(devp, devp->owner);
 		}
-		restoreids();
 		return (error);
 	}
 	if (!mymount(devp->fs->name, mntpath, devp->dev, mopts, cli->uid,
@@ -2238,6 +2300,8 @@ add_ptp_device(const char *ugen)
 	devp->group	= sb.st_gid;
 	devp->st	= st_from_type(ST_PTP);
 	devp->iface	= iface_from_name(dev);
+	devp->model	= NULL;
+	devp->realdev	= NULL;
 	devp->glabel[0] = NULL;
 	devp->mounted   = false;
 	devp->has_media = true;
@@ -2299,6 +2363,8 @@ add_mtp_device(const char *ugen)
 	devp->group	= sb.st_gid;
 	devp->st	= st_from_type(ST_MTP);
 	devp->iface	= iface_from_name(dev);
+	devp->model	= NULL;
+	devp->realdev	= NULL;
 	devp->glabel[0] = NULL;
 	devp->mounted   = false;
 	devp->has_media = true;
