@@ -102,7 +102,7 @@ static int	get_optical_disk_type(const char *);
 static int	get_da_storage_type(const char *);
 static int	mymount(const char *, const char *, const char *,
 		    const char *, uid_t, gid_t);
-static int	mount_device(client_t *, sdev_t *devp);
+static int	mount_device(client_t *, sdev_t *);
 static int	unmount_device(client_t *, sdev_t *, bool, bool);
 static int	extend_iovec(struct iovec **, int *, const char *,
 		    const char *);
@@ -113,7 +113,7 @@ static int	waitforbytes(int);
 static int	uconnect(const char *);
 static int	devd_connect(void);
 static int	send_string(int, const char *);
-static int	client_readln(client_t *cli, int *error);
+static int	client_readln(client_t *, int *);
 static bool	match_part_dev(const char *, size_t);
 static bool	has_media(const char *);
 static bool	is_parted(const char *);
@@ -156,8 +156,8 @@ static void	notifybc(sdev_t *, bool);
 static void	notify(client_t *, sdev_t *, bool);
 static void	cliprint(client_t *, const char *, ...);
 static void	cliprintbc(client_t *, const char *, ...);
-static void	check_mntbl(struct statfs *sb, int nsb);
-static void	check_fuse_mount(struct statfs *sb, int nsb);
+static void	check_mntbl(struct statfs *, int);
+static void	check_fuse_mount(struct statfs *, int);
 static void	check_fuse_unmount(struct statfs *, int);
 static void	*thr_check_mntbl(void *);
 static time_t	do_poll(void);
