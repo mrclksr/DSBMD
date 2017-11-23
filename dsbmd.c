@@ -2604,9 +2604,10 @@ del_device(sdev_t *devp)
 	 * without unmounting it first.
 	 */
 	if (is_mntpt(devs[i]->mntpt)) {
-//	if (getmntpt(devs[i]) != NULL) {
+		(void)pthread_mutex_lock(&mntbl_mtx);
 		(void)unmount(devs[i]->mntpt, MNT_FORCE);
 		(void)rmntpt(devs[i]->mntpt);
+		(void)pthread_mutex_unlock(&mntbl_mtx);
 	}
 	free(devs[i]->mntpt);
 	free(devs[i]->dev);
