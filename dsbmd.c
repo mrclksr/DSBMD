@@ -2396,6 +2396,8 @@ add_fuse_device(const char *mntpt)
 	devp->st	= st_from_type(ST_FUSE);
 	devp->fs	= &fstype[i];
 	devp->iface	= iface_from_type(IF_TYPE_FUSE);
+	devp->model	= NULL;
+	devp->realdev	= NULL;
 	devp->glabel[0]	= NULL;
 	devp->mounted	= true;
 	devp->has_media	= true;
