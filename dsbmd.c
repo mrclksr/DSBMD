@@ -881,7 +881,27 @@ process_devd_event(char *ev)
 			 */
 			if (devp->iface->type != IF_TYPE_CD &&
 			    devp->iface->type != IF_TYPE_MMC) {
-				(void)pthread_mutex_lock(&devp->mtx);
+				if (devp->mounted && is_mntpt(devp->mntpt)) {
+					/*
+					 * Device was removed without un-
+					 * mounting it first. Unmount de-
+					 * vice and remove mount point.
+					 */
+					(void)pthread_mutex_lock(&mntbl_mtx);
+					pthread_mutex_lock(&devp->mtx);
+					(void)unmount(devp->mntpt, MNT_FORCE);
+					rmntpt(devp->mntpt);
+					free(devp->mntpt);
+					devp->mntpt   = NULL;
+					devp->mounted = false;
+					/*
+					 * Restore ownership in case we
+					 * changed it.
+					 */
+					(void)change_owner(devp, devp->owner);
+					(void)pthread_mutex_unlock(&mntbl_mtx);
+				} else
+					(void)pthread_mutex_lock(&devp->mtx);
 				del_device(devp);
 			}
 		}
