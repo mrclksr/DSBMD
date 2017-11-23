@@ -94,7 +94,7 @@
 #define USB_PROTOCOL_PTP   0x01
 
 static int	change_owner(sdev_t *, uid_t);
-static int	ssystem(uid_t, gid_t, const char *);
+static int	ssystem(uid_t, const char *);
 static int	devstat(const char *, struct stat *);
 static int	get_ugen_type(const char *);
 static int	get_optical_disk_type(const char *);
@@ -1370,7 +1370,7 @@ change_owner(sdev_t *dev, uid_t owner)
 }
 
 static int
-ssystem(uid_t uid, gid_t gid, const char *cmd)
+ssystem(uid_t uid, const char *cmd)
 {
 	int	       status;
 	pid_t	       pid;
@@ -1400,7 +1400,7 @@ ssystem(uid_t uid, gid_t gid, const char *cmd)
 			logprint("initgroups()");
 			_exit(255);
 		}
-		if (setgid(pw->pw_gid) == -1)
+		if (setgid(uid) == -1 && setgid(pw->pw_gid) == -1)
 			logprint("setgid(%d)", pw->pw_gid);
 		if (setuid(uid) == -1) {
 			logprint("setuid(%d)", uid);
@@ -1705,7 +1705,7 @@ mount_device(client_t *cli, sdev_t *devp)
 			(void)setenv(ENV_USB_PORT,
 			    ugen_to_gphoto_port(devbasename(devp->dev)), 1);		
 		}
-		if ((error = ssystem(uid, gid, mntcmd)) == 0 &&
+		if ((error = ssystem(uid, mntcmd)) == 0 &&
 		    !is_mntpt(mntpath)) {
 			cliprint(cli, "E:command=mount:code=%d",
 			    ERR_UNKNOWN_ERROR);
