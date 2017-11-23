@@ -884,8 +884,10 @@ process_devd_event(char *ev)
 			 */
 			if (devp->iface->type != IF_TYPE_CD &&
 			    devp->iface->type != IF_TYPE_MMC) {
+				(void)pthread_mutex_lock(&mntbl_mtx);
 				(void)pthread_mutex_lock(&devp->mtx);
 				del_device(devp);
+				(void)pthread_mutex_unlock(&mntbl_mtx);
 			}
 		}
 		(void)pthread_mutex_unlock(&dev_mtx);
@@ -2604,10 +2606,8 @@ del_device(sdev_t *devp)
 	 * without unmounting it first.
 	 */
 	if (is_mntpt(devs[i]->mntpt)) {
-		(void)pthread_mutex_lock(&mntbl_mtx);
 		(void)unmount(devs[i]->mntpt, MNT_FORCE);
 		(void)rmntpt(devs[i]->mntpt);
-		(void)pthread_mutex_unlock(&mntbl_mtx);
 	}
 	free(devs[i]->mntpt);
 	free(devs[i]->dev);
