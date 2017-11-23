@@ -51,6 +51,7 @@
 #include <sys/linker.h>
 #include <sys/module.h>
 #include <sys/wait.h>
+#include <login_cap.h>
 #include <time.h>
 #include <unistd.h>
 #include <vm/vm_param.h>
@@ -131,6 +132,7 @@ static char	*ugen_to_gphoto_port(const char *);
 static void	process_devd_event(char *);
 static void	process_connreq(int);
 static void	usage(void);
+static void	setuserenv(uid_t);
 static void	switcheids(uid_t, gid_t);
 static void	restoreids(void);
 static void	rmntpt(const char *);
@@ -1340,6 +1342,27 @@ switcheids(uid_t euid, gid_t egid)
 }
 
 static void
+setuserenv(uid_t uid)
+{
+	login_cap_t   *lc;
+	struct passwd *pw;
+
+	errno = 0;
+	if ((pw = getpwuid(uid)) == NULL) {
+		if (errno != 0)
+			logprint("getpwuid(%u)", uid);
+		else
+			logprintx("Couldn't find user with UID %u", uid);
+		return;
+	}
+	endpwent();
+	if ((lc = login_getpwclass(pw)) == NULL)
+		err(EXIT_FAILURE, "login_getpwclass()");
+	if (setusercontext(lc, pw, pw->pw_uid, LOGIN_SETALL) == -1)
+		err(EXIT_FAILURE, "setusercontext()");
+}
+
+static void
 restoreids()
 {
 	struct passwd *pw;
@@ -1378,15 +1401,6 @@ ssystem(uid_t uid, const char *cmd)
 	struct passwd *pw;
 
 	errno = 0;
-	if ((pw = getpwuid(uid)) == NULL) {
-		if (errno != 0)
-			logprint("getpwuid(%u)", uid);
-		else
-			logprintx("Couldn't find user with UID %u", uid);
-		return (-1);
-	}
-	endpwent();
-
 	/* Block SIGCHLD */
 	(void)sigemptyset(&sigmask); (void)sigaddset(&sigmask, SIGCHLD);
 	(void)sigprocmask(SIG_BLOCK, &sigmask, &savedmask);
@@ -1396,16 +1410,7 @@ ssystem(uid_t uid, const char *cmd)
 		err(EXIT_FAILURE, "vfork()");
 		/* NOTREACHED */
 	case  0:
-		if (initgroups(pw->pw_name, pw->pw_gid) == -1) {
-			logprint("initgroups()");
-			_exit(255);
-		}
-		if (setgid(uid) == -1 && setgid(pw->pw_gid) == -1)
-			logprint("setgid(%d)", pw->pw_gid);
-		if (setuid(uid) == -1) {
-			logprint("setuid(%d)", uid);
-			_exit(255);
-		}
+		setuserenv(uid);
 		/* Restore old signal mask */
 		(void)sigprocmask(SIG_SETMASK, &savedmask, NULL);
 		execl(_PATH_BSHELL, _PATH_BSHELL, "-c", cmd, NULL);
@@ -1665,6 +1670,7 @@ mount_device(client_t *cli, sdev_t *devp)
 	}
 	if (chown(mntpath, cli->uid, cli->gids[0]) == -1)
 		err(EXIT_FAILURE, "chown(%s)", mntpath);
+
 	if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set()) {
 		/*
 		 * Change the owner of the device so that the user
