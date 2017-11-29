@@ -78,7 +78,7 @@ SETUP
 
            usermount = true
 
-     in dsbmd.conf and set the sysctl variable vfs.usermount to 1:
+     in dsbmd.conf, and set the sysctl variable vfs.usermount to 1:
 
            sysctl vfs.usermount=1
 
