@@ -99,7 +99,7 @@ SETUP
 
            dsbmc-cli -a&
 
-     to your window manager's autostart file.
+     to your shell's rc file, or to your window manager's autostart file.
 
 FILES USED
      /var/run/dsbmd.socket
@@ -270,4 +270,4 @@ DSBMD PROTOCOL SPECIFICATION
      used and ‘free’ is the number of free bytes. If the device/media is not
      mounted, ‘free’ and ‘used’ are 0.
 
-                               November 20, 2017
+                               November 29, 2017
