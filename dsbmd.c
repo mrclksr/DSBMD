@@ -80,6 +80,7 @@
 #include "dsbcfg/dsbcfg.h"
 #include "config.h"
 #include <sys/iconv.h>
+#define DEBUG(s) (void)warnx("%d: %s\n", __LINE__, s)
 
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
@@ -507,8 +508,11 @@ main(int argc, char *argv[])
 	for (polltime = 0;;) {
 		rset = allset;
 		tv.tv_sec = spoll; tv.tv_usec = 0;
-		if (polling && difftime(time(NULL), polltime) >= spoll)
+		if (polling && difftime(time(NULL), polltime) >= spoll) {
+			DEBUG("if (polling && difftime(time(NULL), polltime) >= spoll)");
+			DEBUG("polltime = do_poll();");
 			polltime = do_poll();
+		}
 		switch (select(maxfd + 1, &rset, NULL, NULL,
 		    polling ? &tv : 0)) {
 		case -1:
@@ -517,14 +521,19 @@ main(int argc, char *argv[])
 			err(EXIT_FAILURE, "select()");
 			/* NOTREACHED */
 		case 0:
-			if (polling)
+			if (polling) {
+				DEBUG("if (polling)");
+				DEBUG("polltime = do_poll();");
 				polltime = do_poll();
+			}
 			continue;
 		}
 		if (FD_ISSET(devd_sock, &rset)) {
 			/* New devd event. */
-			while ((ev = read_devd_event(devd_sock, &e)) != NULL)
+			while ((ev = read_devd_event(devd_sock, &e)) != NULL) {
+				DEBUG("process_devd_event(ev);");
 				process_devd_event(ev);
+			}
 			if (e == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
 				FD_CLR(devd_sock, &allset);
@@ -879,8 +888,11 @@ process_devd_event(char *ev)
 	    strcmp(devdevent.subsystem, "CDEV") != 0)
 		return;
 	if (strcmp(devdevent.type, "CREATE") == 0) {
+		DEBUG("(void)pthread_mutex_lock(&dev_mtx);");
 		(void)pthread_mutex_lock(&dev_mtx);
+		DEBUG("add_device(devdevent.cdev);");
 		add_device(devdevent.cdev);
+		DEBUG("(void)pthread_mutex_unlock(&dev_mtx);");
 		(void)pthread_mutex_unlock(&dev_mtx);
 	} else if (strcmp(devdevent.type, "DESTROY") == 0) {
 		(void)pthread_mutex_lock(&dev_mtx);
@@ -976,19 +988,30 @@ has_media(const char *dev)
 	off_t  size;
 	size_t blksz;
 	
-	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
+	DEBUG("if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)");
+	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1) {
+		DEBUG("return (false);");
 		return (false);
+	}
 	size  = g_mediasize(fd);
 	blksz = g_sectorsize(fd);
 	errno = 0;
-	if ((int)size == -blksz || (int)size == -1)
+	DEBUG("if ((int)size == -blksz || (int)size == -1)");
+	if ((int)size == -blksz || (int)size == -1) {
+		DEBUG("media = false;");
 		media = false;
-	else if (read(fd, buf, blksz > sizeof(buf) ? sizeof(buf) : blksz) == -1)
+	} else if (read(fd, buf, blksz > sizeof(buf) ? sizeof(buf) : blksz) == -1) {
+		DEBUG("else if (read(fd, buf, blksz > sizeof(buf) ? sizeof(buf) : blksz) == -1) {");
+		DEBUG("media = false;");
 		media = false;
-	else
+	} else {
+		DEBUG("else {");
+		DEBUG("media = true;");
 		media = true;
+	}
+	DEBUG("(void)close(fd);");
 	(void)close(fd);
-
+	DEBUG("return (media);");
 	return (media);
 }
 
@@ -998,9 +1021,13 @@ do_poll()
 	sdev_t *devp;
 
 	while ((devp = media_changed()) != NULL) {
+		DEBUG("(void)pthread_mutex_lock(&dev_mtx);");
 		(void)pthread_mutex_lock(&dev_mtx);
+		DEBUG("update_device(devp);");
 		update_device(devp);
+		DEBUG("(void)pthread_mutex_unlock(&dev_mtx);");
 		(void)pthread_mutex_unlock(&dev_mtx);
+		
 	}
 	return (time(NULL));
 }
@@ -1014,21 +1041,35 @@ media_changed()
 	static int i = 0, error;
 
 	for (i = i >= queuesz ? 0 : i; i < queuesz; i++) {
-		if ((error = pthread_mutex_trylock(&pollqueue[i]->mtx)) != 0)
+		DEBUG("if ((error = pthread_mutex_trylock(&pollqueue[i]->mtx)) != 0)");
+		if ((error = pthread_mutex_trylock(&pollqueue[i]->mtx)) != 0) {
+			DEBUG("continue");
 			continue;
+		}
+		DEBUG("if (has_media(pollqueue[i]->dev)) {");
 		if (has_media(pollqueue[i]->dev)) {
+			DEBUG("if (!pollqueue[i]->has_media) {");
 			if (!pollqueue[i]->has_media) {
 				/* Media was inserted */
+				DEBUG("pollqueue[i]->has_media = true;");
 				pollqueue[i]->has_media = true;
+				DEBUG("pthread_mutex_unlock(&pollqueue[i]->mtx);");
 				pthread_mutex_unlock(&pollqueue[i]->mtx);
+				DEBUG("return (pollqueue[i++]);");
 				return (pollqueue[i++]);
 			}
 		} else if (pollqueue[i]->has_media) {
+			DEBUG("else if (pollqueue[i]->has_media) {");
 			/* Media was removed */
+			DEBUG("pollqueue[i]->has_media = false;");
 			pollqueue[i]->has_media = false;
+			DEBUG("pthread_mutex_unlock(&pollqueue[i]->mtx);");
 			pthread_mutex_unlock(&pollqueue[i]->mtx);
+			DEBUG("return (pollqueue[i++]);");
 			return (pollqueue[i++]);
 		}
+		DEBUG("}");
+		DEBUG("pthread_mutex_unlock(&pollqueue[i]->mtx);");
 		pthread_mutex_unlock(&pollqueue[i]->mtx);
 	}
 	return (NULL);
@@ -1040,29 +1081,49 @@ update_device(sdev_t *devp)
 	char *p;
 
 	if (devp->has_media) {
+		DEBUG("if (devp->has_media) {");
 		/* Media inserted. */
-		if (pthread_mutex_lock(&devp->mtx) != 0)
+		DEBUG("if (pthread_mutex_lock(&devp->mtx) != 0)");
+		if (pthread_mutex_lock(&devp->mtx) != 0) {
+			DEBUG("return;");
 			return;
+		}
 		free(devp->name); devp->name = NULL;
 		if (devp->iface->type == IF_TYPE_CD) {
+			DEBUG("if (devp->iface->type == IF_TYPE_CD) {");
+			DEBUG("devp->st = get_storage_type(devp->dev);");
 			devp->st = get_storage_type(devp->dev);
 			if (devp->st == NULL) {
+				DEBUG("if (devp->st == NULL) {");
+				DEBUG("(void)pthread_mutex_unlock(&devp->mtx);");
 				(void)pthread_mutex_unlock(&devp->mtx);
+				DEBUG("return;");
 				return;
 			}
+			DEBUG("switch (devp->st->type) {");
 			switch (devp->st->type) {
 			case ST_CDDA:
 			case ST_SVCD:
 			case ST_VCD:
+				DEBUG("case ST_CDDA:case ST_SVCD:case ST_VCD:");
+				DEBUG("devp->visible = true;");
 				devp->visible = true;
+				DEBUG("notifybc(devp, true);");
 				notifybc(devp, true);
+				DEBUG("(void)pthread_mutex_unlock(&devp->mtx);");
 				(void)pthread_mutex_unlock(&devp->mtx);
+				DEBUG("return;");
 				return;
 			case ST_DATACD:
 			case ST_DVD:
+				DEBUG("case ST_DATACD: case ST_DVD:");
+				DEBUG("devp->fs = getfs(devp->dev);");
 				devp->fs = getfs(devp->dev);
 				if (devp->fs == NULL) {
+					DEBUG("if (devp->fs == NULL) {");
+					DEBUG("(void)pthread_mutex_unlock(&devp->mtx);");
 					(void)pthread_mutex_unlock(&devp->mtx);
+					DEBUG("return;");
 					return;
 				}
 				break;
@@ -1070,42 +1131,63 @@ update_device(sdev_t *devp)
 				break;
 			}
 		} else if ((devp->fs = getfs(devp->dev)) == NULL) {
+			DEBUG("} else if ((devp->fs = getfs(devp->dev)) == NULL) {");
+			DEBUG("(void)pthread_mutex_unlock(&devp->mtx);");
 			(void)pthread_mutex_unlock(&devp->mtx);
+			DEBUG("return;");
 			return;
 		}
 		if ((p = get_label(devp->dev, devp->fs->name)) != NULL) {
-			if ((devp->name = strdup(p)) == NULL)
+			DEBUG("if ((p = get_label(devp->dev, devp->fs->name)) != NULL) {");
+			if ((devp->name = strdup(p)) == NULL) {
+				DEBUG("if ((devp->name = strdup(p)) == NULL)");
 				err(EXIT_FAILURE, "strdup()");
+			}
 		} else if ((devp->name = strdup(devbasename(devp->dev))) == NULL)
 			err(EXIT_FAILURE, "strdup()");
 		devp->visible = true;
 		notifybc(devp, true);
+		DEBUG("(void)pthread_mutex_unlock(&devp->mtx);");
 		(void)pthread_mutex_unlock(&devp->mtx);
 	} else {
+		DEBUG("else {");
 		/* Media removed. */
-		if (pthread_mutex_lock(&devp->mtx) != 0)
+		if (pthread_mutex_lock(&devp->mtx) != 0) {
+			DEBUG("if (pthread_mutex_lock(&devp->mtx) != 0) {");
+			DEBUG("return;");
 			return;
+		}
+		DEBUG("devp->visible = false;");
 		devp->visible = false;
 
 		if (devp->fs != NULL) { 
+			DEBUG("if (devp->fs != NULL) { ");
+			DEBUG("notifybc(devp, false);");
 			notifybc(devp, false);
 			devp->fs = NULL;
+			DEBUG("(void)pthread_mutex_unlock(&devp->mtx);");
 			(void)pthread_mutex_unlock(&devp->mtx);
 			if (getmntpt(devp) != NULL) {
+				DEBUG("if (getmntpt(devp) != NULL) {");
 				/*
 				 * Device was ejected without unmounting it
 				 * first.
 				 * Unmount device and remove mount point.
 				 */
+				DEBUG("(void)pthread_mutex_lock(&mntbl_mtx);");
 				(void)pthread_mutex_lock(&mntbl_mtx);
+				DEBUG("pthread_mutex_lock(&devp->mtx);");
 				pthread_mutex_lock(&devp->mtx);
+				DEBUG("(void)unmount(devp->mntpt, MNT_FORCE);");
 				(void)unmount(devp->mntpt, MNT_FORCE);
+				DEBUG("rmntpt(devp->mntpt);");
 				rmntpt(devp->mntpt);
 				free(devp->mntpt);
 				devp->mntpt   = NULL;
 				devp->mounted = false;
 				/* Restore ownership in case we changed it. */
 				(void)change_owner(devp, devp->owner);
+				DEBUG("pthread_mutex_unlock(&devp->mtx);");
 				pthread_mutex_unlock(&devp->mtx);
 				(void)pthread_mutex_unlock(&mntbl_mtx);
 			}
@@ -3349,6 +3431,7 @@ cmd_mount(client_t *cli, char **argv)
 	(void)pthread_mutex_lock(&mntbl_mtx);
 	(void)pthread_mutex_lock(&devp->mtx);
 	(void)pthread_mutex_unlock(&dev_mtx);
+	DEBUG("(void)mount_device(cli, devp);");
 	(void)mount_device(cli, devp);
 	(void)pthread_mutex_unlock(&devp->mtx);
 	(void)pthread_mutex_unlock(&mntbl_mtx);
