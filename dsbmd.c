@@ -129,6 +129,7 @@ static char	*get_diskname(const char *);
 static char	*get_lvm_dev(const char *);
 static char	*dev_from_gptid(const char *);
 static char	*ugen_to_gphoto_port(const char *);
+static void	lockpidfile(void);
 static void	process_devd_event(char *);
 static void	process_connreq(int);
 static void	usage(void);
@@ -221,9 +222,10 @@ struct command_s {
 	{ "size",	&cmd_size    }
 };
 
-static int	nclients = 0;		/* # of connected clients. */
-static int	ndevs  = 0;		/* # of devs. */
-static int	queuesz  = 0;		/* # of devices in poll queue. */
+static int	nclients    = 0;	/* # of connected clients. */
+static int	ndevs	    = 0;	/* # of devs. */
+static int	queuesz	    = 0;	/* # of devices in poll queue. */
+static FILE	*lockfp	    = NULL;	/* Filepointer for lock file. */
 static uid_t    *allow_uids = NULL;	/* UIDs allowed to connect. */
 static gid_t    *allow_gids = NULL;	/* GIDs allowed to connect. */
 static sdev_t	**pollqueue = NULL;	/* List of devices to poll. */
@@ -262,23 +264,6 @@ main(int argc, char *argv[])
 		case '?':
 			usage();
 		}
-	}
-	/* Check if deamon is already running. */
-	if ((fp = fopen(PATH_PID_FILE, "r+")) == NULL) {
-		if (errno != ENOENT)
-			err(EXIT_FAILURE, "fopen(%s)", PATH_PID_FILE);
-		/* Not running - Create the PID/lock file. */
-		if ((fp = fopen(PATH_PID_FILE, "w")) == NULL) {
-			err(EXIT_FAILURE, "couldn't create pid file %s",
-			    PATH_PID_FILE);
-		}
-	}
-	if (lockf(fileno(fp), F_TLOCK, 0) == -1) {
-		if (errno == EWOULDBLOCK) {
-			/* Daemon already running. */
-			errx(EXIT_FAILURE, "%s is already running.", PROGRAM);
-		} else
-			err(EXIT_FAILURE, "flock()");
 	}
 	cfg = dsbcfg_read(NULL, PATH_CONFIG, vardefs, CFG_NVARS);
 	if (cfg == NULL)
@@ -417,16 +402,12 @@ main(int argc, char *argv[])
 			if (i == 0) {
 				(void)setsid();
 				(void)signal(SIGHUP, SIG_IGN);
-			}
+			} else
+				lockpidfile();
 		}
-		/* Write our PID to the PID/lock file. */
-		(void)fprintf(fp, "%d", getpid());
-		(void)fflush(fp);
-		
-		/* Close all files except for the PID/lock file. */
+		/* Close all files except for the lock file. */
 		for (i = 0; i < 16; i++) {
-			/* Do not close our lockfile. */
-			if (fileno(fp) != i)
+			if (fileno(lockfp) != i)
 				(void)close(i);
 		}
 		/* Redirect error messages to logfile. */
@@ -434,7 +415,8 @@ main(int argc, char *argv[])
 			err(EXIT_FAILURE, "fopen()");
 		(void)setvbuf(fp, NULL, _IOLBF, 0);
 		err_set_file(fp);
-	}	
+	} else
+		lockpidfile();
 	(void)signal(SIGINT, cleanup);
 	(void)signal(SIGTERM, cleanup);
 	(void)signal(SIGQUIT, cleanup);
@@ -479,7 +461,6 @@ main(int argc, char *argv[])
 		} else if (!S_ISDIR(sb.st_mode))
 			add_device(dp->d_name);
 	}
-
 	(void)closedir(dirp);
 	if (chdir("/") == -1)
 		err(EXIT_FAILURE, "chdir(/)");
@@ -585,6 +566,30 @@ cleanup(int unused)
 	exit(EXIT_SUCCESS);
 }
 
+static void
+lockpidfile()
+{
+	/* Check if deamon is already running. */
+	if ((lockfp = fopen(PATH_PID_FILE, "r+")) == NULL) {
+		if (errno != ENOENT)
+			err(EXIT_FAILURE, "fopen(%s)", PATH_PID_FILE);
+		/* Not running - Create the PID/lock file. */
+		if ((lockfp = fopen(PATH_PID_FILE, "w")) == NULL) {
+			err(EXIT_FAILURE, "couldn't create pid file %s",
+			    PATH_PID_FILE);
+		}
+	}
+	if (lockf(fileno(lockfp), F_TLOCK, 0) == -1) {
+		if (errno == EAGAIN) {
+			/* Daemon already running. */
+			errx(EXIT_FAILURE, "%s is already running.", PROGRAM);
+		} else
+			err(EXIT_FAILURE, "flock()");
+	}
+	/* Write our PID to the PID/lock file. */
+	(void)fprintf(lockfp, "%d", getpid());
+	(void)fflush(lockfp);
+}
 
 static sdev_t *
 lookup_dev(const char *dev)
