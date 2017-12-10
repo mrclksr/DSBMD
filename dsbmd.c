@@ -589,6 +589,7 @@ lockpidfile()
 	/* Write our PID to the PID/lock file. */
 	(void)fprintf(lockfp, "%d", getpid());
 	(void)fflush(lockfp);
+	(void)ftruncate(fileno(lockfp), ftell(lockfp));
 }
 
 static sdev_t *
