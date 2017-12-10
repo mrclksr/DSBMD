@@ -402,9 +402,9 @@ main(int argc, char *argv[])
 			if (i == 0) {
 				(void)setsid();
 				(void)signal(SIGHUP, SIG_IGN);
-			} else
-				lockpidfile();
+			}
 		}
+		lockpidfile();
 		/* Close all files except for the lock file. */
 		for (i = 0; i < 16; i++) {
 			if (fileno(lockfp) != i)
