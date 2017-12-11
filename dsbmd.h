@@ -118,6 +118,7 @@ typedef struct iface_s {
 typedef struct sdev_s {
 	int	      speed;
 	bool	      mounted;
+	bool	      cmd_mounted;	  /* Mounted using ext. cmd */
 	bool	      has_media;
 	bool	      polling;		  /* May be polled. */
 	bool	      visible;		  /* Visible to client? */
@@ -133,7 +134,6 @@ typedef struct sdev_s {
 	gid_t	      group;		  /* GID of device. */
 	const iface_t *iface;		  /* Interface type */
 	const storage_type_t *st;  	  /* Media/storage type */
-	pthread_mutex_t mtx;
 } sdev_t;
 
 /*
@@ -149,7 +149,6 @@ typedef struct client_s {
 	gid_t *gids;			  /* Client GIDs. */
 	size_t rd;			  /* # of bytes in buffer */
 	size_t slen;			  /* Len. of string in buffer. */
-	pthread_mutex_t mtx;		  /* Mutex to synchronize messages. */
 } client_t;
 
 #endif	/* !_DSBMD_H_ */
