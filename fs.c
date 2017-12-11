@@ -49,17 +49,6 @@
 
 #define EXT_SB_OFFSET		     1080
 
-#define REISERFS_SB_OFFSET	     (1024 * 64)
-#define REISERFS_SB_OLD_OFFSET	     (1024 *  8)
-#define REISERFS_MAGIC_OFFSET	     0x34
-#define REISERFS1_MAGIC		     "ReIsErFs"
-#define REISERFS2_MAGIC		     "ReIsEr2Fs"
-#define REISERFS3_MAGIC		     "ReIsEr3Fs"
-
-#define XFS_SB_OFFSET		     0x00
-#define XFS_MAGIC_OFFSET	     0x00
-#define XFS_MAGIC		     "XFSB"
-
 #define ISO9660_PD_OFFSET	     32768  /* Iso primary descriptor offset */
 #define ISO9660_ID_OFFSET	     1
 #define ISO9660_ID		     "CD001"
@@ -80,8 +69,6 @@ static bool is_ntfs(FILE *);
 static bool is_exfat(FILE *);
 static bool is_ufs(FILE *);
 static bool is_ext(FILE *);
-static bool is_reiserfs(FILE *);
-static bool is_xfs(FILE *);
 static bool is_iso9660(FILE *);
 
 fs_t fstype[] = {
@@ -91,8 +78,6 @@ fs_t fstype[] = {
 	{ "ntfs",     NTFS,    NULL, NULL,    NULL		    },
 	{ "ext2fs",   EXT,     NULL, NULL,    NULL		    },
 	{ "exfat",    EXFAT,   NULL, NULL,    NULL		    },
-	{ "reiserfs", REISERFS,NULL, NULL,    NULL		    },
-	{ "xfs",      XFS,     NULL, NULL,    NULL		    },
 	{ "fuse",     FUSEFS,  NULL, NULL,    NULL		    },
 	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL		    },
 	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL		    }
@@ -107,8 +92,6 @@ static struct getfs_s {
 	{ is_exfat,    EXFAT    },
 	{ is_ufs,      UFS      },
 	{ is_ext,      EXT      },
-	{ is_reiserfs, REISERFS },
-	{ is_xfs,      XFS	},
 	{ is_iso9660,  CD9660	}
 };
 
@@ -306,41 +289,6 @@ is_ext(FILE *dev)
 	if ((p = bbread(dev, EXT_SB_OFFSET, DFLTSBSZ)) == NULL)
 		return (false);
 	if (p[0] == 0x53 && p[1] == 0xef)
-		return (true);
-	return (false);
-}
-
-static bool
-is_reiserfs(FILE *dev)
-{
-	int	    i, j;
-	uint8_t	   *p;
-	const int   offset[] = { REISERFS_SB_OLD_OFFSET, REISERFS_SB_OFFSET };
-	const char *magic[]  = { REISERFS1_MAGIC, REISERFS2_MAGIC,
-				 REISERFS3_MAGIC };
-
-	for (i = 0; i < sizeof(offset) / sizeof(int); i++) {
-		if ((p = bbread(dev, offset[i], DFLTSBSZ)) == NULL)
-			return (false);
-		for (j = 0; j < sizeof(magic) / sizeof(char *); j++) {
-			if (strncmp((char *)&p[REISERFS_MAGIC_OFFSET],
-			    magic[j], strlen(magic[j])) == 0) {
-				return (true);
-			}
-		}
-	}
-	return (false);
-}
-
-static bool
-is_xfs(FILE *dev)
-{
-	uint8_t *p;
-
-	if ((p = bbread(dev, XFS_SB_OFFSET, DFLTSBSZ)) == NULL)
-		return (false);
-	if (strncmp((char *)&p[XFS_MAGIC_OFFSET], XFS_MAGIC,
-	    strlen(XFS_MAGIC)) == 0)
 		return (true);
 	return (false);
 }
