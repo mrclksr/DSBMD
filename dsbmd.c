@@ -671,9 +671,7 @@ add_client(int socket)
 	cp->overflow = false;
 
 	/* 
-	 * Send the client the current list of mountable devs. Since we
-	 * want  to  send  the up to date device information, we must lock
-	 * all devices until we are done.
+	 * Send the client the current list of mountable devs.
 	 */
 	for (n = 0; n < ndevs; n++) {
 		if (devs[n]->visible)
@@ -681,14 +679,6 @@ add_client(int socket)
 	}
 	/* Terminate device list output. */
 	cliprint(cp, "=");
-
-	/*
-	 * Increasing  the  nclients  variable  must happen within the lock,
-	 * because  the  other  clients  don't know that this client exists.
-	 * If another client modifies a device and sends a broadcast message,
-	 * this  client  won't receive it and hence, its information is out-
-	 * dated.
-	 */
 	nclients++;
 	logprintx("Client with UID %d connected", uid);
 
@@ -3098,8 +3088,8 @@ notifybc(sdev_t *devp, bool add)
 }
 
 /*
- * Client thread function - Reads lines from the client's socket, parses
- * them and takes actions accordingly.
+ * Reads lines from the client's socket, parses them and
+ * takes actions accordingly.
  */
 static int
 serve_client(client_t *cli)
