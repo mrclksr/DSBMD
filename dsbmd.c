@@ -85,6 +85,7 @@
 #define NDISK_TYPES	   (sizeof(disktypes) / sizeof(disktypes[0]))
 #define NDISK_CLASSES	   (sizeof(disk_classes) / sizeof(disk_classes[0]))
 #define MNTCHK_INTERVAL	   1
+#define PROCMAXWAIT	   10
 
 #define USB_CLASS_UMASS	   0x08
 #define USB_SUBCLASS_UMASS 0x06
@@ -1370,7 +1371,7 @@ ssystem(uid_t uid, const char *cmd)
 	int	 i, sc, status, sigs[2] = { SIGTERM, SIGKILL };
 	pid_t	 pid, ret;
 	sigset_t sigmask, savedmask;
-	int procmaxwait = 10;
+
 	errno = 0;
 	/* Block SIGCHLD */
 	(void)sigemptyset(&sigmask); (void)sigaddset(&sigmask, SIGCHLD);
@@ -1392,7 +1393,7 @@ ssystem(uid_t uid, const char *cmd)
 		(void)sigprocmask(SIG_SETMASK, &savedmask, NULL);
 		break;
 	}
-	for (i = errno = 0; i < procmaxwait; errno = 0) {
+	for (i = errno = 0; i < PROCMAXWAIT; errno = 0) {
 		ret = waitpid(pid, &status, WEXITED | WNOHANG);
 		if (ret == (pid_t)-1 && errno == EINTR)
 			continue;
@@ -1403,7 +1404,7 @@ ssystem(uid_t uid, const char *cmd)
 		(void)sleep(1);
 		i++;
 	}
-	if (i >= procmaxwait) {
+	if (i >= PROCMAXWAIT) {
 		/* Kill blocking process */
 		logprintx("Killing blocking process %u ...", pid);
 		for (sc = 0; sc < sizeof(sigs) / sizeof(int); sc++) {
