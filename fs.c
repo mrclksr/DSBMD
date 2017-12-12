@@ -83,16 +83,18 @@ fs_t fstype[] = {
 	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL		    }
 };
 
+const int nfstypes = sizeof(fstype) / sizeof(fstype[0]);
+
 static struct getfs_s {
 	bool (*chkf)(FILE *);
 	FSID type;
 } getfsd[] = {
-	{ is_fat,      MSDOSFS  },
-	{ is_ntfs,     NTFS     },
-	{ is_exfat,    EXFAT    },
-	{ is_ufs,      UFS      },
-	{ is_ext,      EXT      },
-	{ is_iso9660,  CD9660	}
+	{ is_fat,      MSDOSFS },
+	{ is_ntfs,     NTFS    },
+	{ is_exfat,    EXFAT   },
+	{ is_ufs,      UFS     },
+	{ is_ext,      EXT     },
+	{ is_iso9660,  CD9660  }
 };
 
 static uint8_t *
@@ -317,7 +319,7 @@ getfs(const char *disk)
 	}
 	for (i = 0; i < sizeof(getfsd) / sizeof(struct getfs_s); i++) {
 		if (getfsd[i].chkf(dev)) {
-			for (j = 0; j < NFSTYPES; j++) {
+			for (j = 0; j < nfstypes; j++) {
 				if (getfsd[i].type == fstype[j].id) {
 					(void)fclose(dev);
 					return (&fstype[j]);
