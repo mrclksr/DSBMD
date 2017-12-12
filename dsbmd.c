@@ -80,6 +80,7 @@
 #include "config.h"
 #include <sys/iconv.h>
 
+#define MNTPTMODE	   (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
 #define NDISK_TYPES	   (sizeof(disktypes) / sizeof(disktypes[0]))
@@ -122,6 +123,7 @@ static bool	check_permission(uid_t, gid_t *);
 static bool	usermount_set(void);
 static char	*read_devd_event(int, int *);
 static char	**extend_list(char **, int *, const char *);
+static char	*mkmntpt(const sdev_t *);
 static char	*getmntpt(sdev_t *);
 static char	*get_cam_modelname(const char *);
 static char	*get_diskname(const char *);
@@ -1526,14 +1528,11 @@ check_permission(uid_t uid, gid_t *gids)
 static int
 mount_device(client_t *cli, sdev_t *devp)
 {
-	int	    error = 0, i, j, len;
-	bool	    have_mntpt = false;
-	char	    mopts[512], romopts[512], num[12], *mntpath, *p, *q;
-	uid_t	    uid;
-	gid_t	    gid;
-	mode_t	    mode;
-	const char  *op, *mntcmd;
-	struct stat sb;
+	int	   error = 0, i, j, len;
+	char	   mopts[512], romopts[512], num[12], *mntpath, *p, *q;
+	uid_t	   uid;
+	gid_t	   gid;
+	const char *op, *mntcmd;
 
 	if (!devp->has_media) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_NO_MEDIA);
@@ -1588,87 +1587,9 @@ mount_device(client_t *cli, sdev_t *devp)
 		cliprint(cli, "E:command=mount:code=%d", ERR_ALREADY_MOUNTED);
 		return (ERR_ALREADY_MOUNTED);
 	}
-
-	/* Create the mount point */
-	if (dsbcfg_getval(cfg, CFG_MNTDIR).string == NULL)
-		errx(EXIT_FAILURE, "mount_dir undefined");
-	if (mkdir(dsbcfg_getval(cfg, CFG_MNTDIR).string, MNTDIRPERM) == -1) {
-		if (errno != EEXIST)
-			err(EXIT_FAILURE, "mkdir(%s)",
-			    dsbcfg_getval(cfg, CFG_MNTDIR).string);
-	}
-	mntpath = malloc(strlen(dsbcfg_getval(cfg, CFG_MNTDIR).string) +
-	    strlen(devp->name) + 2);
-	if (mntpath == NULL)
-		err(EXIT_FAILURE, "malloc()");
-	/* Skip directory part in case of Linux LV */
-	if ((p = strchr(devp->name, '/')) != NULL)
-		p++;
-	else
-		p = devp->name;
-	(void)sprintf(mntpath, "%s/%s", dsbcfg_getval(cfg, CFG_MNTDIR).string,
-	    p);
-
-	/* Mode for the mount point: rwx r-x r-x */
-	mode = (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH);
-
-	if (stat(mntpath, &sb) == -1 && errno != ENOENT)
-		err(EXIT_FAILURE, "stat(%s)", mntpath);
-	else if (errno == ENOENT) {
-		if (mkdir(mntpath, mode) == -1)
-			err(EXIT_FAILURE, "mkdir(%s)", mntpath);
-	} else {
-		/* 
-		 * File exists.  If  the  file  isn't  a  directory, or a
-		 * directory  which  is  not  empty,  or  if there is any
-		 * other reason why we can't delete the directory, try to
-		 * create an alternative mount point.
-		 */		
-		if (!S_ISDIR(sb.st_mode) || rmdir(mntpath) == -1) {
-			free(mntpath);
-			if ((mntpath = malloc(MNAMELEN)) == NULL)
-				err(EXIT_FAILURE, "malloc()");
-			if (strcmp(devbasename(devp->dev), devp->name) != 0) {
-				/*
-				 * If  the  device's  devname is != its vol ID
-				 * try   to   create   a   mount   path   with
-				 * <mntdir>/<devname>. If that also fails, try
-				 * to create a random mount path.
-				 */
-				(void)snprintf(mntpath, MNAMELEN, "%s/%s",
-				    dsbcfg_getval(cfg, CFG_MNTDIR).string,
-				    devbasename(devp->dev));
-				if (mkdir(mntpath, mode) == -1) {
-					if (errno != EEXIST)
-						err(EXIT_FAILURE, "mkdir(%s)",
-						    mntpath);
-					/* Dir exists. */
-					have_mntpt = false;
-				} else
-					have_mntpt = true; /* Yay! */
-			}
-			if (!have_mntpt) {
-				/*
-				 * No luck so far. Create a random mount
-				 * point
-				 */
-				(void)snprintf(mntpath, MNAMELEN, "%s/%s.XXXX",
-				    dsbcfg_getval(cfg, CFG_MNTDIR).string,
-				    devbasename(devp->dev));
-				if (mkdtemp(mntpath) == NULL) {
-					err(EXIT_FAILURE, "mkdtemp(%s)",
-					    mntpath);
-				}
-			}
-		} else {
-			/* Recreate directory */
-			if (mkdir(mntpath, mode) == -1)
-				err(EXIT_FAILURE, "mkdir(%s)", mntpath);
-		}
-	}
+	mntpath = mkmntpt(devp);
 	if (chown(mntpath, cli->uid, cli->gids[0]) == -1)
 		err(EXIT_FAILURE, "chown(%s)", mntpath);
-
 	if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set()) {
 		/*
 		 * Change the owner of the device so that the user
@@ -1758,10 +1679,9 @@ mount_device(client_t *cli, sdev_t *devp)
 			err(EXIT_FAILURE, "getmntpt()");
 		devp->mounted = true;
 		devp->cmd_mounted = false;
-		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
-		    devp->dev, devp->mntpt);
-		cliprintbc(cli, "M:dev=%s:mntpt=%s",
-		    devp->dev, devp->mntpt);
+		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s", devp->dev,
+		    devp->mntpt);
+		cliprintbc(cli, "M:dev=%s:mntpt=%s", devp->dev, devp->mntpt);
 		logprintx("Device %s mounted on %s by UID %d", devp->dev,
 		    devp->mntpt, cli->uid);
 		return (0);
@@ -1841,6 +1761,84 @@ unmount_device(client_t *cli, sdev_t *devp, bool force, bool eject)
 	sleep(1);
 
 	return (0);
+}
+
+static char *
+mkmntpt(const sdev_t *dp)
+{
+	char	    *mntpath;
+	size_t	    pathlen, namelen, devlen;
+	const char  *mntdir, *p;
+	struct stat sb;
+
+	/* Create the mount point */
+	if ((mntdir = dsbcfg_getval(cfg, CFG_MNTDIR).string) == NULL)
+		errx(EXIT_FAILURE, "mount_dir undefined");
+	if (mkdir(mntdir, MNTDIRPERM) == -1) {
+		if (errno != EEXIST)
+			err(EXIT_FAILURE, "mkdir(%s)", mntdir);
+	}
+	/* Skip directory part in case of Linux LV */
+	if ((p = strchr(dp->name, '/')) != NULL)
+		p++;
+	else
+		p = dp->name;
+
+	pathlen  = strlen(mntdir);
+	namelen  = strlen(p);
+	devlen	 = strlen(devbasename(dp->dev));
+	pathlen += (namelen < devlen ? devlen : namelen) + 2;
+
+	if ((mntpath = malloc(pathlen)) == NULL)
+		err(EXIT_FAILURE, "malloc()");
+	(void)sprintf(mntpath, "%s/%s", mntdir, p);
+
+	if (stat(mntpath, &sb) == -1 && errno != ENOENT)
+		err(EXIT_FAILURE, "stat(%s)", mntpath);
+	else if (errno == ENOENT) {
+		if (mkdir(mntpath, MNTPTMODE) == -1)
+			err(EXIT_FAILURE, "mkdir(%s)", mntpath);
+	} else {
+		/* 
+		 * File exists.  If  the  file  isn't  a  directory, or a
+		 * directory  which  is  not  empty,  or  if there is any
+		 * other reason why we can't delete the directory, try to
+		 * create an alternative mount point.
+		 */		
+		if (!S_ISDIR(sb.st_mode) || rmdir(mntpath) == -1) {
+			free(mntpath);
+			if ((mntpath = malloc(MNAMELEN)) == NULL)
+				err(EXIT_FAILURE, "malloc()");
+			if (strcmp(devbasename(dp->dev), dp->name) != 0) {
+				/*
+				 * If  the  device's  devname is != its vol ID
+				 * try   to   create   a   mount   path   with
+				 * <mntdir>/<devname>. If that also fails, try
+				 * to create a random mount path.
+				 */
+				(void)snprintf(mntpath, MNAMELEN, "%s/%s",
+				    mntdir, devbasename(dp->dev));
+				if (mkdir(mntpath, MNTPTMODE) == -1) {
+					if (errno != EEXIST)
+						err(EXIT_FAILURE, "mkdir(%s)",
+						    mntpath);
+				} else
+					return (mntpath);
+			}
+			/*
+			 * No luck so far. Create a random mount point
+			 */
+			(void)snprintf(mntpath, MNAMELEN, "%s/%s.XXXX",
+			    mntdir, devbasename(dp->dev));
+			if (mkdtemp(mntpath) == NULL)
+				err(EXIT_FAILURE, "mkdtemp(%s)", mntpath);
+		} else {
+			/* Recreate directory */
+			if (mkdir(mntpath, MNTPTMODE) == -1)
+				err(EXIT_FAILURE, "mkdir(%s)", mntpath);
+		}
+	}
+	return (mntpath);
 }
 
 /*
