@@ -47,7 +47,12 @@
 
 #define DFLTSBSZ		     512    /* Default super block size. */
 
-#define EXT_SB_OFFSET		     1080
+#define EXT_SB_PADDING		     1024
+#define EXT_MAGIC_OFFS		     0x0038
+#define EXT_FEATURE_INCOMP_OFFS	     0x0060
+#define EXT_INCOMP_FTYPE	     0x0002
+#define EXT_INCOMP_EXTENTS	     0x0040
+#define EXT4_INCOMP_MASK	     (EXT_INCOMP_FTYPE | EXT_INCOMP_EXTENTS)
 
 #define ISO9660_PD_OFFSET	     32768  /* Iso primary descriptor offset */
 #define ISO9660_ID_OFFSET	     1
@@ -69,6 +74,7 @@ static bool is_ntfs(FILE *);
 static bool is_exfat(FILE *);
 static bool is_ufs(FILE *);
 static bool is_ext(FILE *);
+static bool is_ext4(FILE *dev);
 static bool is_iso9660(FILE *);
 
 fs_t fstype[] = {
@@ -77,6 +83,7 @@ fs_t fstype[] = {
 	{ "msdosfs",  MSDOSFS, NULL, "large", "large,uid=%u,gid=%g" },
 	{ "ntfs",     NTFS,    NULL, NULL,    NULL		    },
 	{ "ext2fs",   EXT,     NULL, NULL,    NULL		    },
+	{ "ext2fs",   EXT4,    NULL, NULL,    NULL		    },
 	{ "exfat",    EXFAT,   NULL, NULL,    NULL		    },
 	{ "fuse",     FUSEFS,  NULL, NULL,    NULL		    },
 	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL		    },
@@ -93,6 +100,7 @@ static struct getfs_s {
 	{ is_ntfs,     NTFS    },
 	{ is_exfat,    EXFAT   },
 	{ is_ufs,      UFS     },
+	{ is_ext4,     EXT4    },
 	{ is_ext,      EXT     },
 	{ is_iso9660,  CD9660  }
 };
@@ -288,10 +296,33 @@ is_ext(FILE *dev)
 {
 	uint8_t *p;
 
-	if ((p = bbread(dev, EXT_SB_OFFSET, DFLTSBSZ)) == NULL)
+	if ((p = bbread(dev, EXT_SB_PADDING, DFLTSBSZ)) == NULL)
 		return (false);
-	if (p[0] == 0x53 && p[1] == 0xef)
+	if (p[EXT_MAGIC_OFFS] == 0x53 && p[EXT_MAGIC_OFFS + 1] == 0xef)
 		return (true);
+	return (false);
+}
+
+static bool
+is_ext4(FILE *dev)
+{
+	int	i;
+	uint8_t *p;
+	uint32_t incomp;
+
+	if (!is_ext(dev))
+		return (false);
+	if ((p = bbread(dev, EXT_SB_PADDING, DFLTSBSZ)) == NULL)
+		return (false);
+	incomp = le32dec(&p[EXT_FEATURE_INCOMP_OFFS]);
+	/*
+	 * If there are features set not yet supported by ext2fs(5),
+	 * treat filesystem as Ext4.
+	 */
+	for (i = 0; i < sizeof(incomp) * 8; i++) {
+		if ((incomp & (1 << i)) && !((1 << i) & EXT4_INCOMP_MASK))
+			return (true);
+	}
 	return (false);
 }
 
@@ -322,6 +353,7 @@ getfs(const char *disk)
 			for (j = 0; j < nfstypes; j++) {
 				if (getfsd[i].type == fstype[j].id) {
 					(void)fclose(dev);
+					warnx("FS == %s", fstype[j].name);
 					return (&fstype[j]);
 				}
 			}
