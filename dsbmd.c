@@ -317,7 +317,7 @@ main(int argc, char *argv[])
 		polling = false;
 	else
 		polling = true;
-	for (i = 0; i < NFSTYPES; i++) {
+	for (i = 0; i < nfstypes; i++) {
 		switch (fstype[i].id) {
 		case UFS:
 			fstype[i].uopts  = dsbcfg_getval(cfg,
@@ -2254,7 +2254,7 @@ add_ptp_device(const char *ugen)
 		err(EXIT_FAILURE, "malloc()");
 	if ((devp->dev = strdup(devpath(dev))) == NULL)
 		err(EXIT_FAILURE, "strdup()");
-	for (i = 0; i < NFSTYPES && fstype[i].id != PTPFS; i++)
+	for (i = 0; i < nfstypes && fstype[i].id != PTPFS; i++)
 		;
 	devp->fs = &fstype[i];
 	if ((devp->name = get_label(dev, devp->fs->name)) != NULL) {
@@ -2314,7 +2314,7 @@ add_mtp_device(const char *ugen)
 	if ((devp->dev = strdup(devpath(dev))) == NULL)
 		err(EXIT_FAILURE, "strdup()");
 
-	for (i = 0; i < NFSTYPES && fstype[i].id != MTPFS; i++)
+	for (i = 0; i < nfstypes && fstype[i].id != MTPFS; i++)
 		;
 	devp->fs = &fstype[i];
 	if ((devp->name = get_label(dev, devp->fs->name)) != NULL) {
@@ -2371,7 +2371,7 @@ add_fuse_device(const char *mntpt)
 		p++;
 	if ((devp->name = strdup(p)) == NULL)
 		err(EXIT_FAILURE, "strdup()");
-	for (i = 0; i < NFSTYPES && fstype[i].id != FUSEFS; i++)
+	for (i = 0; i < nfstypes && fstype[i].id != FUSEFS; i++)
 		;
 	devp->st	  = st_from_type(ST_FUSE);
 	devp->fs	  = &fstype[i];
