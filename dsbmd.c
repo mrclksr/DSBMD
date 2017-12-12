@@ -1596,6 +1596,7 @@ mount_device(client_t *cli, sdev_t *devp)
 		 * can mount it.
 		 */
 		if (change_owner(devp, cli->uid) == -1) {
+			rmntpt(mntpath); free(mntpath);
 			cliprint(cli, "E:command=mount:code=%d", errno);
 			return (-1);
 		}
