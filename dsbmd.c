@@ -1357,10 +1357,12 @@ change_owner(sdev_t *dev, uid_t owner)
 static int
 ssystem(uid_t uid, const char *cmd)
 {
-	int	 i, sc, status, sigs[2] = { SIGTERM, SIGKILL };
+	int	 i, procmaxwait, sc, status, sigs[2] = { SIGTERM, SIGKILL };
 	pid_t	 pid, ret;
 	sigset_t sigmask, savedmask;
 
+	if ((procmaxwait = dsbcfg_getval(cfg, CFG_PROCMAXWAIT).integer) <= 0)
+		procmaxwait = PROCMAXWAIT;
 	errno = 0;
 	/* Block SIGCHLD */
 	(void)sigemptyset(&sigmask); (void)sigaddset(&sigmask, SIGCHLD);
@@ -1382,7 +1384,7 @@ ssystem(uid_t uid, const char *cmd)
 		(void)sigprocmask(SIG_SETMASK, &savedmask, NULL);
 		break;
 	}
-	for (i = errno = 0; i < PROCMAXWAIT; errno = 0) {
+	for (i = errno = 0; i < procmaxwait; errno = 0) {
 		ret = waitpid(pid, &status, WEXITED | WNOHANG);
 		if (ret == (pid_t)-1 && errno == EINTR)
 			continue;
@@ -1393,7 +1395,7 @@ ssystem(uid_t uid, const char *cmd)
 		(void)sleep(1);
 		i++;
 	}
-	if (i >= PROCMAXWAIT) {
+	if (i >= procmaxwait) {
 		/* Kill blocking process */
 		logprintx("Killing blocking process %u ...", pid);
 		for (sc = 0; sc < sizeof(sigs) / sizeof(int); sc++) {
