@@ -384,7 +384,6 @@ main(int argc, char *argv[])
 			break;
 		}
 	}
-
 	/* Ready to deamonize. */
 	if (!fflag) {
 		for (i = 0; i < 2; i++) {
@@ -1577,7 +1576,7 @@ mount_device(client_t *cli, sdev_t *devp)
 	}
 
 	/* Check if the device is already mounted. */
-	if ((devp->mounted && devp->fs->mntcmd) || getmntpt(devp) != NULL) {
+	if ((devp->mounted && devp->cmd_mounted) || getmntpt(devp) != NULL) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_ALREADY_MOUNTED);
 		return (ERR_ALREADY_MOUNTED);
 	}
@@ -1674,11 +1673,11 @@ mount_device(client_t *cli, sdev_t *devp)
 	}
 	errno = 0;
 
-	if (devp->fs->mntcmd != NULL) {
+	if (devp->fs->mntcmd != NULL || (devp->fs->mntcmd_u != NULL &&
+	    dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set())) {
 		/*
 		 * Execute the userdefined mount command.
 		 */
-
 		/* Mount as user if "usermount" and vfs.usermount is set */
 		if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean &&
 		    usermount_set()) {
@@ -1715,6 +1714,7 @@ mount_device(client_t *cli, sdev_t *devp)
 		} else if (is_mntpt(mntpath)) {
 			devp->mntpt = mntpath;
 			devp->mounted = true;
+			devp->cmd_mounted = true;
 			cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
 			    devp->dev, devp->mntpt);
 			cliprintbc(cli, "M:dev=%s:mntpt=%s",
@@ -1749,6 +1749,7 @@ mount_device(client_t *cli, sdev_t *devp)
 		if (getmntpt(devp) == NULL)
 			err(EXIT_FAILURE, "getmntpt()");
 		devp->mounted = true;
+		devp->cmd_mounted = false;
 		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
 		    devp->dev, devp->mntpt);
 		cliprintbc(cli, "M:dev=%s:mntpt=%s",
@@ -1778,8 +1779,7 @@ unmount_device(client_t *cli, sdev_t *devp, bool force, bool eject)
 {
 
 	if (devp->iface->type != IF_TYPE_FUSE &&
-	    (!devp->mounted && devp->fs->mntcmd != NULL) &&
-	    getmntpt(devp) == NULL) {
+	    (!devp->mounted && devp->cmd_mounted) && getmntpt(devp) == NULL) {
 		if (!eject) {
 			cliprint(cli, "E:command=unmount:code=%d",
 			    ERR_NOT_MOUNTED);
@@ -2267,19 +2267,20 @@ add_ptp_device(const char *ugen)
 			err(EXIT_FAILURE, "malloc()");
 		(void)sprintf(devp->name, "Camera (%s)", dev);
 	}
-	devp->owner	= sb.st_uid;
-	devp->group	= sb.st_gid;
-	devp->st	= st_from_type(ST_PTP);
-	devp->iface	= iface_from_name(dev);
-	devp->model	= NULL;
-	devp->realdev	= NULL;
-	devp->glabel[0] = NULL;
-	devp->mounted   = false;
-	devp->has_media = true;
-	devp->polling   = false;
-	devp->ejectable	= false;
-	devp->visible	= true;
-	devp->mntpt	= NULL;
+	devp->owner	  = sb.st_uid;
+	devp->group	  = sb.st_gid;
+	devp->st	  = st_from_type(ST_PTP);
+	devp->iface	  = iface_from_name(dev);
+	devp->model	  = NULL;
+	devp->realdev	  = NULL;
+	devp->glabel[0]   = NULL;
+	devp->mounted     = false;
+	devp->has_media   = true;
+	devp->polling     = false;
+	devp->ejectable	  = false;
+	devp->visible	  = true;
+	devp->mntpt	  = NULL;
+	devp->cmd_mounted = false;
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
 		err(EXIT_FAILURE, "realloc()");
@@ -2326,19 +2327,20 @@ add_mtp_device(const char *ugen)
 			err(EXIT_FAILURE, "malloc()");
 		(void)sprintf(devp->name, "MTP device (%s)", dev);
 	}
-	devp->owner	= sb.st_uid;
-	devp->group	= sb.st_gid;
-	devp->st	= st_from_type(ST_MTP);
-	devp->iface	= iface_from_name(dev);
-	devp->model	= NULL;
-	devp->realdev	= NULL;
-	devp->glabel[0] = NULL;
-	devp->mounted   = false;
-	devp->has_media = true;
-	devp->polling   = false;
-	devp->ejectable	= false;
-	devp->visible	= true;
-	devp->mntpt	= NULL;
+	devp->owner	  = sb.st_uid;
+	devp->group	  = sb.st_gid;
+	devp->st	  = st_from_type(ST_MTP);
+	devp->iface	  = iface_from_name(dev);
+	devp->model	  = NULL;
+	devp->realdev	  = NULL;
+	devp->glabel[0]   = NULL;
+	devp->mounted     = false;
+	devp->has_media   = true;
+	devp->polling     = false;
+	devp->ejectable	  = false;
+	devp->visible	  = true;
+	devp->mntpt	  = NULL;
+	devp->cmd_mounted = false;
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
 		err(EXIT_FAILURE, "realloc()");
@@ -2371,19 +2373,19 @@ add_fuse_device(const char *mntpt)
 		err(EXIT_FAILURE, "strdup()");
 	for (i = 0; i < NFSTYPES && fstype[i].id != FUSEFS; i++)
 		;
-	devp->st	= st_from_type(ST_FUSE);
-	devp->fs	= &fstype[i];
-	devp->iface	= iface_from_type(IF_TYPE_FUSE);
-	devp->model	= NULL;
-	devp->realdev	= NULL;
-	devp->glabel[0]	= NULL;
-	devp->mounted	= true;
-	devp->has_media	= true;
-	devp->polling	= false;
-	devp->visible	= true;
-	devp->ejectable	= false;
-	devp->mntpt	= strdup(mntpt);
-	if (devp->mntpt == NULL)
+	devp->st	  = st_from_type(ST_FUSE);
+	devp->fs	  = &fstype[i];
+	devp->iface	  = iface_from_type(IF_TYPE_FUSE);
+	devp->model	  = NULL;
+	devp->realdev	  = NULL;
+	devp->glabel[0]	  = NULL;
+	devp->mounted	  = true;
+	devp->has_media	  = true;
+	devp->polling	  = false;
+	devp->visible	  = true;
+	devp->ejectable	  = false;
+	devp->cmd_mounted = false;
+	if ((devp->mntpt = strdup(mntpt)) == NULL)
 		err(EXIT_FAILURE, "strdup()");
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
@@ -2486,17 +2488,18 @@ add_device(const char *devname)
 	/* Terminate glabel list. */
 	devp->glabel[j]	= NULL;
 
-	devp->owner	= sb.st_uid;
-	devp->group	= sb.st_gid;
-	devp->st	= dev.st;
-	devp->iface     = dev.iface;
-	devp->fs	= dev.fs;
-	devp->mounted   = false;
-	devp->mntpt     = NULL;
-	devp->realdev   = dev.realdev;
-	devp->has_media = dev.has_media;
-	devp->visible	= false;
-	devp->ejectable = dev.ejectable;
+	devp->owner	  = sb.st_uid;
+	devp->group	  = sb.st_gid;
+	devp->st	  = dev.st;
+	devp->iface       = dev.iface;
+	devp->fs	  = dev.fs;
+	devp->mounted	  = false;
+	devp->mntpt       = NULL;
+	devp->realdev     = dev.realdev;
+	devp->has_media   = dev.has_media;
+	devp->visible	  = false;
+	devp->ejectable   = dev.ejectable;
+	devp->cmd_mounted = false;
 
 	/* Set max. CD/DVD reading speed. */
 	if (devp->iface->type == IF_TYPE_CD) {
@@ -2559,7 +2562,6 @@ add_device(const char *devname)
 		devp->visible = false;
 	if (devp->visible)
 		notifybc(devp, true);
-
 	return (devp);
 }
 
@@ -2838,8 +2840,7 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 		cliprint(cli, "E:command=eject:code=%d", ERR_NOT_EJECTABLE);
 		return (ERR_NOT_EJECTABLE);
 	}
-	if ((devp->mounted && devp->fs->mntcmd != NULL) ||
-	    getmntpt(devp) != NULL) {
+	if ((devp->mounted && devp->cmd_mounted) || getmntpt(devp) != NULL) {
 		if ((error = unmount_device(cli, devp, force, true)) != 0) {
 			cliprint(cli, "E:command=eject:code=%d", error);
 			return (error);
@@ -3448,7 +3449,7 @@ check_mntbl(struct statfs *sb, int nsb)
 				    dp->dev, dp->mntpt);
 			}
 		} else if (dp->mounted) {
-			if (dp->fs->mntcmd != NULL) {
+			if (dp->cmd_mounted) {
 				if (is_mntpt(dp->mntpt))
 					continue;
 			}	
