@@ -349,6 +349,14 @@ main(int argc, char *argv[])
 			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
 			    CFG_NTFS_MNTCMD_U).string;
 			break;
+		case EXT4:
+			fstype[i].uopts  = dsbcfg_getval(cfg,
+			    CFG_EXT4_OPTS).string;
+			fstype[i].mntcmd = dsbcfg_getval(cfg,
+			    CFG_EXT4_MNTCMD).string;
+			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
+			    CFG_EXT4_MNTCMD_U).string;
+			break;
 		case EXT:
 			fstype[i].uopts  = dsbcfg_getval(cfg,
 			    CFG_EXT_OPTS).string;
