@@ -35,13 +35,14 @@ typedef enum FSID {
 typedef struct fs_s {
 	const char *name;
 	FSID	   id;
-	const char *mntcmd;   /* User defined mount command */
-	const char *mntcmd_u; /* User defined mount command for user mode */
-	const char *dopts;    /* Default mount options. */
-	const char *uopts;    /* User defined mount options. */
+	const char *mntcmd;	/* User defined mount command */
+	const char *mntcmd_u;	/* User defined mount command for user mode */
+	const char *dopts;	/* Default mount options. */
+	const char *uopts;	/* User defined mount options. */
 } fs_t;
 
 extern fs_t fstype[];
+extern const int nfstypes;	/* # of filesystems/elements in fstype[] */
 
 extern fs_t *getfs(const char *);
 extern char *get_exfat_label(const char *);
