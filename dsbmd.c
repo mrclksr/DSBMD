@@ -84,8 +84,6 @@
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
 #define NDISK_TYPES	   (sizeof(disktypes) / sizeof(disktypes[0]))
 #define NDISK_CLASSES	   (sizeof(disk_classes) / sizeof(disk_classes[0]))
-#define MNTCHK_INTERVAL	   1
-#define PROCMAXWAIT	   10
 
 #define USB_CLASS_UMASS	   0x08
 #define USB_SUBCLASS_UMASS 0x06
@@ -491,7 +489,8 @@ main(int argc, char *argv[])
 	maxfd   = devd_sock > ls ? devd_sock : ls;
 
 	/* Min. time interval for select() */
-	minsecs = MNTCHK_INTERVAL < spoll ? MNTCHK_INTERVAL : spoll; 
+	minsecs = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer < spoll ? \
+		  dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer : spoll;
 
 	FD_ZERO(&allset);
 	FD_SET(ls, &allset); FD_SET(devd_sock, &allset);
@@ -1361,8 +1360,7 @@ ssystem(uid_t uid, const char *cmd)
 	pid_t	 pid, ret;
 	sigset_t sigmask, savedmask;
 
-	if ((procmaxwait = dsbcfg_getval(cfg, CFG_PROCMAXWAIT).integer) <= 0)
-		procmaxwait = PROCMAXWAIT;
+	procmaxwait = dsbcfg_getval(cfg, CFG_PROCMAXWAIT).integer;
 	errno = 0;
 	/* Block SIGCHLD */
 	(void)sigemptyset(&sigmask); (void)sigaddset(&sigmask, SIGCHLD);
