@@ -883,15 +883,14 @@ process_devd_event(char *ev)
 	if (strcmp(devdevent.type, "CREATE") == 0) {
 		add_device(devdevent.cdev);
 	} else if (strcmp(devdevent.type, "DESTROY") == 0) {
-		devp = lookup_dev(devdevent.cdev);
-		if (devp != NULL) {
-			/*
-			 * Do not delete cd or mmcsd devices.
-			 */
-			if (devp->iface->type != IF_TYPE_CD &&
-			    devp->iface->type != IF_TYPE_MMC)
-				del_device(devp);
-		}
+		if ((devp = lookup_dev(devdevent.cdev)) == NULL)
+			return;
+		/*
+		 * Do not delete cd or mmcsd devices.
+		 */
+		if (devp->iface->type != IF_TYPE_CD &&
+		    devp->iface->type != IF_TYPE_MMC)
+			del_device(devp);
 	}
 }
 
