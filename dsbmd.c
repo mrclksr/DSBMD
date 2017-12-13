@@ -103,6 +103,7 @@ static int	mymount(const char *, const char *, const char *,
 		    const char *, uid_t, gid_t);
 static int	mount_device(client_t *, sdev_t *);
 static int	unmount_device(client_t *, sdev_t *, bool, bool);
+static int	exec_mntcmd(client_t *, sdev_t *, char *);
 static int	extend_iovec(struct iovec **, int *, const char *,
 		    const char *);
 static int	eject_media(client_t *, sdev_t *, bool);
@@ -1527,11 +1528,9 @@ check_permission(uid_t uid, gid_t *gids)
 static int
 mount_device(client_t *cli, sdev_t *devp)
 {
-	int	   error = 0, i, j, len;
+	int	   i, j, len;
 	char	   mopts[512], romopts[512], num[12], *mntpath, *p, *q;
-	uid_t	   uid;
-	gid_t	   gid;
-	const char *op, *mntcmd;
+	const char *op;
 
 	if (!devp->has_media) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_NO_MEDIA);
@@ -1607,68 +1606,7 @@ mount_device(client_t *cli, sdev_t *devp)
 		/*
 		 * Execute the userdefined mount command.
 		 */
-		/* Mount as user if "usermount" and vfs.usermount is set */
-		if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean &&
-		    usermount_set()) {
-			uid = cli->uid;
-			gid = cli->gids[0];
-			mntcmd = devp->fs->mntcmd_u;
-		} else {
-			uid = 0;
-			gid = 0;
-			mntcmd = devp->fs->mntcmd;
-		}
-		(void)snprintf(num, sizeof(num), "%u", cli->uid);
-		(void)setenv(ENV_UID, num, 1);
-		(void)snprintf(num, sizeof(num), "%u", cli->gids[0]);
-		(void)setenv(ENV_GID, num, 1);
-		(void)setenv(ENV_DEV, devp->dev, 1);
-		(void)setenv(ENV_LABEL, devp->name, 1);
-		(void)setenv(ENV_FILESYSTEM, devp->fs->name, 1);
-		(void)setenv(ENV_MNTPT, mntpath, 1);
-		if (devp->iface->type == IF_TYPE_UGEN) {
-			(void)setenv(ENV_USB_PORT,
-			    ugen_to_gphoto_port(devbasename(devp->dev)), 1);		
-		}
-		if ((error = ssystem(uid, mntcmd)) == 0 &&
-		    !is_mntpt(mntpath)) {
-			cliprint(cli, "E:command=mount:code=%d",
-			    ERR_UNKNOWN_ERROR);
-			logprintx("Command '%s' executed by UID %d returned " \
-			    "0, but the mount point %s could not be found " \
-			    "in the mount table", mntcmd, cli->uid, mntpath);
-			(void)change_owner(devp, devp->owner);
-			rmntpt(mntpath);
-			free(mntpath);
-		} else if (is_mntpt(mntpath)) {
-			devp->mntpt = mntpath;
-			devp->mounted = true;
-			devp->cmd_mounted = true;
-			cliprint(cli, "O:command=mount:dev=%s:mntpt=%s",
-			    devp->dev, devp->mntpt);
-			cliprintbc(cli, "M:dev=%s:mntpt=%s",
-			    devp->dev, devp->mntpt);
-			logprintx("Device %s mounted on %s by UID %d",
-			    devp->dev, devp->mntpt, cli->uid);
-		} else {
-			cliprint(cli, "E:command=mount:code=%d:mntcmderr=%d",
-			    ERR_MNTCMD_FAILED, error);
-			if (errno != 0) {
-				logprint("Command %s executed by UID %d " \
-				    "failed with code %d", mntcmd, cli->uid,
-				    error);
-				rmntpt(mntpath);
-				free(mntpath);
-			} else {
-				logprintx("Command %s executed by UID %d " \
-                                    "failed with code %d", mntcmd, cli->uid,
-				    error);
-				rmntpt(mntpath);
-				free(mntpath);
-			}
-			(void)change_owner(devp, devp->owner);
-		}
-		return (error);
+		return (exec_mntcmd(cli, devp, mntpath));
 	}
 	if (!mymount(devp->fs->name, mntpath, devp->dev, mopts, cli->uid,
 	    cli->gids[0]) ||
@@ -1692,6 +1630,66 @@ mount_device(client_t *cli, sdev_t *devp)
 	rmntpt(mntpath);
 	free(mntpath);
 
+	return (0);
+}
+
+static int
+exec_mntcmd(client_t *cli, sdev_t *devp, char *mntpath)
+{
+	int	    error;
+	uid_t	    uid;
+	gid_t	    gid;
+	char	    num[12];
+	const char *mntcmd;
+
+	if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set()) {
+		uid = cli->uid;
+		gid = cli->gids[0];
+		mntcmd = devp->fs->mntcmd_u;
+	} else {
+		uid = 0;
+		gid = 0;
+		mntcmd = devp->fs->mntcmd;
+	}
+	(void)snprintf(num, sizeof(num), "%u", cli->uid);
+	(void)setenv(ENV_UID, num, 1);
+	(void)snprintf(num, sizeof(num), "%u", cli->gids[0]);
+	(void)setenv(ENV_GID, num, 1);
+	(void)setenv(ENV_DEV, devp->dev, 1);
+	(void)setenv(ENV_LABEL, devp->name, 1);
+	(void)setenv(ENV_FILESYSTEM, devp->fs->name, 1);
+	(void)setenv(ENV_MNTPT, mntpath, 1);
+	if (devp->iface->type == IF_TYPE_UGEN) {
+		(void)setenv(ENV_USB_PORT,
+		    ugen_to_gphoto_port(devbasename(devp->dev)), 1);
+	}
+	if ((error = ssystem(uid, mntcmd)) == 0 && !is_mntpt(mntpath)) {
+		cliprint(cli, "E:command=mount:code=%d", ERR_UNKNOWN_ERROR);
+		logprintx("Command '%s' executed by UID %d returned "	  \
+			  "0, but the mount point %s could not be found " \
+			  "in the mount table", mntcmd, cli->uid, mntpath);
+		(void)change_owner(devp, devp->owner);
+		rmntpt(mntpath);
+		free(mntpath);
+	} else if (is_mntpt(mntpath)) {
+		devp->mntpt = mntpath;
+		devp->mounted = true;
+		devp->cmd_mounted = true;
+		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s", devp->dev,
+		    devp->mntpt);
+		cliprintbc(cli, "M:dev=%s:mntpt=%s", devp->dev, devp->mntpt);
+		logprintx("Device %s mounted on %s by UID %d", devp->dev,
+		    devp->mntpt, cli->uid);
+	} else {
+		cliprint(cli, "E:command=mount:code=%d:mntcmderr=%d",
+		    ERR_MNTCMD_FAILED, error);
+		logprint("Command %s executed by UID %d " \
+			 "failed with code %d", mntcmd, cli->uid,
+			 errno != 0 ? errno : error);
+		rmntpt(mntpath);
+		free(mntpath);
+		(void)change_owner(devp, devp->owner);
+	}
 	return (error);
 }
 
