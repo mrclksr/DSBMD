@@ -348,19 +348,8 @@ main(int argc, char *argv[])
 		case MTPFS:
 			INITFS(i, MTPFS);
 			break;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_MTPFS_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_MTPFS_MNTCMD_U).string;
-			break;
 		case PTPFS:
 			INITFS(i, PTPFS);
-			break;
-
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_PTPFS_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_PTPFS_MNTCMD_U).string;
 			break;
 		default:
 			/* Just to soothe clang. */
