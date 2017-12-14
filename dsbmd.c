@@ -83,8 +83,6 @@
 #define MNTPTMODE	   (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
-#define NDISK_TYPES	   (sizeof(disktypes) / sizeof(disktypes[0]))
-#define NDISK_CLASSES	   (sizeof(disk_classes) / sizeof(disk_classes[0]))
 
 #define USB_CLASS_UMASS	   0x08
 #define USB_SUBCLASS_UMASS 0x06
@@ -92,6 +90,12 @@
 #define USB_CLASS_PTP	   0x06
 #define USB_SUBCLASS_PTP   0x01
 #define USB_PROTOCOL_PTP   0x01
+
+#define INITFS(i, ID) do {						     \
+	fstype[i].mntcmd   = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD).string;   \
+	fstype[i].mntcmd_u = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD_U).string; \
+	fstype[i].uopts	   = dsbcfg_getval(cfg, CFG_##ID##_OPTS).string;     \
+} while (0)
 
 static int	change_owner(sdev_t *, uid_t);
 static int	ssystem(uid_t, const char *);
@@ -321,68 +325,38 @@ main(int argc, char *argv[])
 	for (i = 0; i < nfstypes; i++) {
 		switch (fstype[i].id) {
 		case UFS:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_UFS_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_UFS_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_UFS_MNTCMD_U).string;
+			INITFS(i, UFS);
 			break;
 		case CD9660:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_CD9660_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_CD9660_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_CD9660_MNTCMD_U).string;
+			INITFS(i, CD9660);
 			break;
 		case MSDOSFS:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_MSDOSFS_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_MSDOSFS_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_MSDOSFS_MNTCMD_U).string;
+			INITFS(i, MSDOSFS);
 			break;
 		case NTFS:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_NTFS_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_NTFS_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_NTFS_MNTCMD_U).string;
+			INITFS(i, NTFS);
 			break;
 		case EXT4:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_EXT4_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_EXT4_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_EXT4_MNTCMD_U).string;
+			INITFS(i, EXT4);
 			break;
 		case EXT:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_EXT_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_EXT_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_EXT_MNTCMD_U).string;
+			INITFS(i, EXT);
 			break;
 		case EXFAT:
-			fstype[i].uopts  = dsbcfg_getval(cfg,
-			    CFG_EXFAT_OPTS).string;
-			fstype[i].mntcmd = dsbcfg_getval(cfg,
-			    CFG_EXFAT_MNTCMD).string;
-			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
-			    CFG_EXFAT_MNTCMD_U).string;
+			INITFS(i, EXFAT);
 			break;
 		case MTPFS:
+			INITFS(i, MTPFS);
+			break;
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_MTPFS_MNTCMD).string;
 			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
 			    CFG_MTPFS_MNTCMD_U).string;
 			break;
 		case PTPFS:
+			INITFS(i, PTPFS);
+			break;
+
 			fstype[i].mntcmd = dsbcfg_getval(cfg,
 			    CFG_PTPFS_MNTCMD).string;
 			fstype[i].mntcmd_u = dsbcfg_getval(cfg,
