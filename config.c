@@ -55,6 +55,8 @@ dsbcfg_vardef_t vardefs[] = {
  { "ext_opts",              DSBCFG_VAR_STRING,  CFG_EXT_OPTS	     	      },
  { "ext4_opts",             DSBCFG_VAR_STRING,  CFG_EXT4_OPTS	     	      },
  { "exfat_opts",            DSBCFG_VAR_STRING,  CFG_EXFAT_OPTS	     	      },
+ { "mtpfs_opts",            DSBCFG_VAR_STRING,  CFG_MTPFS_OPTS	     	      },
+ { "ptpfs_opts",            DSBCFG_VAR_STRING,  CFG_PTPFS_OPTS	     	      },
  { "procmaxwait",	    DSBCFG_VAR_INTEGER, CFG_PROCMAXWAIT,     VAL(10)  },
  { "cdrspeed",	            DSBCFG_VAR_INTEGER, CFG_CDRSPEED,	     VAL(16)  },
  { "max_clients",           DSBCFG_VAR_INTEGER, CFG_MAX_CLIENTS,     VAL(10)  },
