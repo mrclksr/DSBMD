@@ -23,8 +23,8 @@ FEATURES
      •   For each supported filesystem, mount flags or external mount commands
          can be defined.
 
-     •   Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2fs, and
-         exFAT.
+     •   Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2/3, Ext4,
+         and exFAT.
 
      •   Mounts and unmounts not initiated though DSBMD are detected, and
          necessary action are taken.
@@ -270,4 +270,4 @@ DSBMD PROTOCOL SPECIFICATION
      used and ‘free’ is the number of free bytes. If the device/media is not
      mounted, ‘free’ and ‘used’ are 0.
 
-                               November 29, 2017
+                               December 15, 2017
