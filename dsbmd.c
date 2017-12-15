@@ -241,8 +241,8 @@ static dsbcfg_t *cfg	    = NULL;
 int
 main(int argc, char *argv[])
 {
-	int	       i, e, spoll, ls, sflags, maxfd, ch, devd_sock, minsecs;
-	int	       mntchkiv;
+	int	       i, e, ls, sflags, maxfd, ch, devd_sock, minsecs;
+	int	       mntchkiv, polliv;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag, polling;
 	FILE	       *fp;
@@ -318,9 +318,9 @@ main(int argc, char *argv[])
 		}
 	}
 	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer; 
-	spoll = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
+	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 
-	if (spoll <= 0)
+	if (polliv <= 0)
 		polling = false;
 	else
 		polling = true;
@@ -465,8 +465,8 @@ main(int argc, char *argv[])
 	maxfd   = devd_sock > ls ? devd_sock : ls;
 
 	/* Min. time interval for select() */
-	minsecs = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer < spoll ? \
-		  dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer : spoll;
+	minsecs = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer < polliv ? \
+		  dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer : polliv;
 
 	FD_ZERO(&allset);
 	FD_SET(ls, &allset); FD_SET(devd_sock, &allset);
@@ -477,7 +477,7 @@ main(int argc, char *argv[])
 		tv.tv_sec = minsecs; tv.tv_usec = 0;
 		if (time(NULL) - mntchktime >= mntchkiv) 
 			mntchktime = poll_mntbl();
-		if (polling && difftime(time(NULL), polltime) >= spoll)
+		if (polling && difftime(time(NULL), polltime) >= polliv)
 			polltime = do_poll();
 		switch (select(maxfd + 1, &rset, NULL, NULL, &tv)) {
 		case -1:
@@ -486,7 +486,7 @@ main(int argc, char *argv[])
 			err(EXIT_FAILURE, "select()");
 			/* NOTREACHED */
 		case 0:
-			if (polling && difftime(time(NULL), polltime) >= spoll)
+			if (polling && difftime(time(NULL), polltime) >= polliv)
 				polltime = do_poll();
 			if (time(NULL) - mntchktime >= mntchkiv) 
 				mntchktime = poll_mntbl();
@@ -1145,11 +1145,6 @@ is_mountable(const char *dev)
 	struct xswdev xsw;
 
 	dev = devbasename(dev);
-#if 0
-	/* Only accept partitions/slices if the device has them. */
-	if (is_parted(dev) && !match_part_dev(dev, 0))
-		return (false);
-#endif
 	while ((fs = getfsent()) != NULL) {
 		q = devbasename(fs->fs_spec);
 		for (i = 0, found = false; i < NGLBLPRFX && !found; i++) {
