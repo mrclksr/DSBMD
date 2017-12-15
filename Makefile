@@ -16,7 +16,7 @@ PROGRAM_FLAGS	    += -DPATH_DSBMD_LOG=\"${LOGFILE}\"
 PROGRAM_FLAGS	    += -DPATH_PID_FILE=\"${PIDFILE}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_SOCKET=\"${SOCKETPATH}\"
 PROGRAM_FLAGS	    += -DPATH_CONFIG=\"${CFGDIR}/${CFGFILE}\"
-PROGRAM_LIBS	     = -lgeom -lcam -lpthread -lutil -lkiconv -lusb
+PROGRAM_LIBS	     = -lgeom -lcam -lutil -lkiconv -lusb
 BSD_INSTALL_DATA    ?= install -m 0644
 BSD_INSTALL_SCRIPT  ?= install -m 555
 BSD_INSTALL_PROGRAM ?= install -s -m 555
