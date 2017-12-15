@@ -932,8 +932,9 @@ has_media(const char *dev)
 	bool   media;
 	off_t  size;
 	size_t blksz;
-	
-	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
+
+	warnx("Polling %s", dev);	
+	if ((fd = open(dev, O_RDWR | O_NONBLOCK)) == -1)
 		return (false);
 	size  = g_mediasize(fd);
 	blksz = g_sectorsize(fd);
@@ -1143,10 +1144,11 @@ is_mountable(const char *dev)
 	struct xswdev xsw;
 
 	dev = devbasename(dev);
-
+#if 0
 	/* Only accept partitions/slices if the device has them. */
 	if (is_parted(dev) && !match_part_dev(dev, 0))
 		return (false);
+#endif
 	while ((fs = getfsent()) != NULL) {
 		q = devbasename(fs->fs_spec);
 		for (i = 0, found = false; i < NGLBLPRFX && !found; i++) {
@@ -2367,7 +2369,7 @@ static sdev_t *
 add_device(const char *devname)
 {
 	int	    len, i, j, speed, fd;
-	char	    **v, *path, *realdev;
+	char	    **v, *diskname, *path, *realdev;
 	sdev_t	    *devp, dev = { 0 };
 	const char  *p;
 	struct stat sb;
@@ -2384,15 +2386,31 @@ add_device(const char *devname)
 	}
 	if ((dev.iface = iface_from_name(devname)) == NULL)
 		return (NULL);
-	dev.st = get_storage_type(devname);
-	if (dev.st == NULL && dev.iface->type != IF_TYPE_CD)
-		return (NULL);
-	if (dev.st != NULL) {
-		if (dev.st->type == ST_MTP)
+	dev.polling = false;
+	if ((dev.st = get_storage_type(devname)) != NULL) {
+		if (dev.st->type == ST_USB_CARDREADER) {
+			warn("Cardreader %s", devname);
+			diskname = get_diskname(devname);
+			/* Only poll disk device, not slices. */
+			if (strcmp(diskname, devname) == 0)
+				dev.polling = true;
+		} else if (is_parted(devname) && !match_part_dev(devname, 0))
+			return (NULL);
+		else if (dev.st->type == ST_MTP)
 			return (add_mtp_device(devname));
 		else if (dev.st->type == ST_PTP)
 			return (add_ptp_device(devname));
-	}
+	} else if (dev.iface->type != IF_TYPE_CD)
+		return (NULL);
+	if (dev.iface->type == IF_TYPE_CD) {
+		/* Ignore devices like 'cd0a' */
+		p = strchr(devname, '\0') - 1;
+		if (strchr("abcdefgh", *p) != NULL)
+			return (NULL);
+		dev.polling = true;
+	} else if (dev.iface->type == IF_TYPE_MMC)
+		dev.polling = true;
+
 	if (dev.iface->type == IF_TYPE_LVM) {
 		realdev = get_lvm_dev(devname);
 		if (realdev == NULL)
@@ -2405,12 +2423,6 @@ add_device(const char *devname)
 		return (NULL);
 	if (!is_mountable(devname))
 		return (NULL);
-	if (dev.iface->type == IF_TYPE_CD) {
-		/* Ignore devices like 'cd0a' */
-		p = strchr(devname, '\0') - 1;
-		if (strchr("abcdefgh", *p) != NULL)
-			return (NULL);
-	}
 	/* Get full path to device */
 	path = devpath(devname);
 
@@ -2462,6 +2474,7 @@ add_device(const char *devname)
 	devp->fs	  = dev.fs;
 	devp->mounted	  = false;
 	devp->mntpt       = NULL;
+	devp->polling	  = dev.polling;
 	devp->realdev     = dev.realdev;
 	devp->has_media   = dev.has_media;
 	devp->visible	  = false;
@@ -2483,12 +2496,6 @@ add_device(const char *devname)
 	(void)getmntpt(devp);
 	if (devp->mntpt != NULL)
 		devp->mounted = true;
-	if (devp->iface->type == IF_TYPE_CD  ||
-	    devp->iface->type == IF_TYPE_MMC ||
-	    (devp->st != NULL && devp->st->type == ST_USB_CARDREADER))
-		devp->polling = true;
-	else
-		devp->polling = false;
 	switch (devp->iface->type) {
 	case IF_TYPE_DA:
 	case IF_TYPE_CD:
