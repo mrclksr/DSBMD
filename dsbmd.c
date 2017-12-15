@@ -242,6 +242,7 @@ int
 main(int argc, char *argv[])
 {
 	int	       i, e, spoll, ls, sflags, maxfd, ch, devd_sock, minsecs;
+	int	       mntchkiv;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag, polling;
 	FILE	       *fp;
@@ -316,6 +317,7 @@ main(int argc, char *argv[])
 				logprint("kldload(%s)", *v);
 		}
 	}
+	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer; 
 	spoll = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 
 	if (spoll <= 0)
@@ -473,7 +475,7 @@ main(int argc, char *argv[])
 	for (polltime = mntchktime = 0;;) {
 		rset = allset;
 		tv.tv_sec = minsecs; tv.tv_usec = 0;
-		if (time(NULL) - mntchktime >= 1)
+		if (time(NULL) - mntchktime >= mntchkiv) 
 			mntchktime = poll_mntbl();
 		if (polling && difftime(time(NULL), polltime) >= spoll)
 			polltime = do_poll();
@@ -484,9 +486,10 @@ main(int argc, char *argv[])
 			err(EXIT_FAILURE, "select()");
 			/* NOTREACHED */
 		case 0:
-			mntchktime = poll_mntbl();
-			if (polling)
+			if (polling && difftime(time(NULL), polltime) >= spoll)
 				polltime = do_poll();
+			if (time(NULL) - mntchktime >= mntchkiv) 
+				mntchktime = poll_mntbl();
 			continue;
 		}
 		if (FD_ISSET(devd_sock, &rset)) {
@@ -850,10 +853,9 @@ process_devd_event(char *ev)
 		if ((devp = lookup_dev(devdevent.cdev)) == NULL)
 			return;
 		/*
-		 * Do not delete cd or mmcsd devices.
+		 * Do not delete cd devices.
 		 */
-		if (devp->iface->type != IF_TYPE_CD &&
-		    devp->iface->type != IF_TYPE_MMC)
+		if (devp->iface->type != IF_TYPE_CD)
 			del_device(devp);
 	}
 }
@@ -933,8 +935,7 @@ has_media(const char *dev)
 	off_t  size;
 	size_t blksz;
 
-	warnx("Polling %s", dev);	
-	if ((fd = open(dev, O_RDWR | O_NONBLOCK)) == -1)
+	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
 		return (false);
 	size  = g_mediasize(fd);
 	blksz = g_sectorsize(fd);
@@ -2389,17 +2390,17 @@ add_device(const char *devname)
 	dev.polling = false;
 	if ((dev.st = get_storage_type(devname)) != NULL) {
 		if (dev.st->type == ST_USB_CARDREADER) {
-			warn("Cardreader %s", devname);
 			diskname = get_diskname(devname);
 			/* Only poll disk device, not slices. */
 			if (strcmp(diskname, devname) == 0)
 				dev.polling = true;
-		} else if (is_parted(devname) && !match_part_dev(devname, 0))
-			return (NULL);
-		else if (dev.st->type == ST_MTP)
+		} else if (dev.st->type == ST_MTP)
 			return (add_mtp_device(devname));
 		else if (dev.st->type == ST_PTP)
 			return (add_ptp_device(devname));
+		else if (is_parted(devname) && !match_part_dev(devname, 0))
+			/* Only add slices of partitioned disks. */
+			return (NULL);
 	} else if (dev.iface->type != IF_TYPE_CD)
 		return (NULL);
 	if (dev.iface->type == IF_TYPE_CD) {
@@ -2408,9 +2409,7 @@ add_device(const char *devname)
 		if (strchr("abcdefgh", *p) != NULL)
 			return (NULL);
 		dev.polling = true;
-	} else if (dev.iface->type == IF_TYPE_MMC)
-		dev.polling = true;
-
+	} 
 	if (dev.iface->type == IF_TYPE_LVM) {
 		realdev = get_lvm_dev(devname);
 		if (realdev == NULL)
@@ -2425,7 +2424,6 @@ add_device(const char *devname)
 		return (NULL);
 	/* Get full path to device */
 	path = devpath(devname);
-
 	if ((dev.has_media = has_media(path)))
 		dev.fs = getfs(path);
 	else
@@ -2433,7 +2431,6 @@ add_device(const char *devname)
 	if (dev.fs == NULL && dev.has_media) {
 		if (dev.st != NULL) {
 			if (dev.st->type != ST_USB_CARDREADER &&
-			    dev.st->type != ST_MMC &&
 			    dev.iface->type != IF_TYPE_CD) {
 				/* HDD/USB stick with unknown filesystem. */
 				return (NULL);
