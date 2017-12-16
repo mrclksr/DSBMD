@@ -317,8 +317,8 @@ main(int argc, char *argv[])
 				logprint("kldload(%s)", *v);
 		}
 	}
+	polliv   = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer; 
-	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 
 	for (i = 0; i < nfstypes; i++) {
 		switch (fstype[i].id) {
