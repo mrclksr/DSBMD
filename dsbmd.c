@@ -884,31 +884,31 @@ parse_devd_event(char *str)
 }
 
 static void
-add_to_pollqueue(sdev_t *drv)
+add_to_pollqueue(sdev_t *devp)
 {
 	int   i, len;
 	char *p;
 
-	for (p = drv->dev; !isdigit(*p); p++)
+	for (p = devp->dev; !isdigit(*p); p++)
 		;
 	if (p[1] == '\0')
-		len = strlen(drv->dev);
+		len = strlen(devp->dev);
 	else {
 		if ((p[1] == 's' || p[1] == 'p') && isdigit(p[2])) {
 			/* Do not add slices. */
 			return;
 		}
-		len = p - drv->dev + 1;
+		len = p - devp->dev + 1;
 	}
 	for (i = 0; i < queuesz; i++) {
-		if (strncmp(drv->dev, pollqueue[i]->dev, len) == 0)
+		if (strncmp(devp->dev, pollqueue[i]->dev, len) == 0)
 			return;
 	}
 	if ((pollqueue = realloc(pollqueue,
 	    sizeof(sdev_t *) * (queuesz + 1))) == NULL)
 		err(EXIT_FAILURE, "realloc()");
-	pollqueue[queuesz] = drv;
-	pollqueue[queuesz]->has_media = has_media(drv->dev);
+	pollqueue[queuesz] = devp;
+	pollqueue[queuesz]->has_media = has_media(devp->dev);
 	queuesz++;
 }
 
@@ -1723,7 +1723,7 @@ unmount_device(client_t *cli, sdev_t *devp, bool force, bool eject)
 }
 
 static char *
-mkmntpt(const sdev_t *dp)
+mkmntpt(const sdev_t *devp)
 {
 	char	    *mntpath;
 	size_t	    pathlen, namelen, devlen;
@@ -1738,14 +1738,14 @@ mkmntpt(const sdev_t *dp)
 			err(EXIT_FAILURE, "mkdir(%s)", mntdir);
 	}
 	/* Skip directory part in case of Linux LV */
-	if ((p = strchr(dp->name, '/')) != NULL)
+	if ((p = strchr(devp->name, '/')) != NULL)
 		p++;
 	else
-		p = dp->name;
+		p = devp->name;
 
 	pathlen  = strlen(mntdir);
 	namelen  = strlen(p);
-	devlen	 = strlen(devbasename(dp->dev));
+	devlen	 = strlen(devbasename(devp->dev));
 	pathlen += (namelen < devlen ? devlen : namelen) + 2;
 
 	if ((mntpath = malloc(pathlen)) == NULL)
@@ -1768,7 +1768,7 @@ mkmntpt(const sdev_t *dp)
 			free(mntpath);
 			if ((mntpath = malloc(MNAMELEN)) == NULL)
 				err(EXIT_FAILURE, "malloc()");
-			if (strcmp(devbasename(dp->dev), dp->name) != 0) {
+			if (strcmp(devbasename(devp->dev), devp->name) != 0) {
 				/*
 				 * If  the  device's  devname is != its vol ID
 				 * try   to   create   a   mount   path   with
@@ -1776,7 +1776,7 @@ mkmntpt(const sdev_t *dp)
 				 * to create a random mount path.
 				 */
 				(void)snprintf(mntpath, MNAMELEN, "%s/%s",
-				    mntdir, devbasename(dp->dev));
+				    mntdir, devbasename(devp->dev));
 				if (mkdir(mntpath, MNTPTMODE) == -1) {
 					if (errno != EEXIST)
 						err(EXIT_FAILURE, "mkdir(%s)",
@@ -1788,7 +1788,7 @@ mkmntpt(const sdev_t *dp)
 			 * No luck so far. Create a random mount point
 			 */
 			(void)snprintf(mntpath, MNAMELEN, "%s/%s.XXXX",
-			    mntdir, devbasename(dp->dev));
+			    mntdir, devbasename(devp->dev));
 			if (mkdtemp(mntpath) == NULL)
 				err(EXIT_FAILURE, "mkdtemp(%s)", mntpath);
 		} else {
@@ -3302,7 +3302,7 @@ check_fuse_mount(struct statfs *sb, int nsb)
 {
 	int	   i, j;
 	bool	   found;
-	sdev_t	   *dp;
+	sdev_t	   *devp;
 	const char *q;
 
 	for (i = 0; i < nsb; i++) {
@@ -3310,10 +3310,10 @@ check_fuse_mount(struct statfs *sb, int nsb)
 		/* Check for new FUSE device mounts */
 		if (strncmp(q, "fuse", 4) == 0) {
 			for (found = false, j = 0; j < ndevs && !found; j++) {
-				dp = devs[j];
-				if (dp->mntpt == NULL)
+				devp = devs[j];
+				if (devp->mntpt == NULL)
 					continue;
-				if (strcmp(dp->mntpt, sb[i].f_mntonname) == 0)
+				if (strcmp(devp->mntpt, sb[i].f_mntonname) == 0)
 					found = true;
 			}
 			if (!found) {
@@ -3346,19 +3346,19 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 }
 
 static bool
-match_glabel(sdev_t *dp, const char *dev)
+match_glabel(sdev_t *devp, const char *dev)
 {
 	int   i;
 	char *p;
 
 	dev = devbasename(dev);
-	for (i = 0; i < NGLBLPRFX && dp->glabel[i] != NULL; i++) {
+	for (i = 0; i < NGLBLPRFX && devp->glabel[i] != NULL; i++) {
 		/* Skip the glabel-prefix (ufs/, cd9660/, etc.). */
-		if ((p = strchr(dp->glabel[i], '/')) != NULL)
+		if ((p = strchr(devp->glabel[i], '/')) != NULL)
 			p++;
 		else
-			p = dp->glabel[i];
-		if (strcmp(dp->glabel[i], dev) == 0 || strcmp(p, dev) == 0)
+			p = devp->glabel[i];
+		if (strcmp(devp->glabel[i], dev) == 0 || strcmp(p, dev) == 0)
 			return (true);
 	}
 
@@ -3370,7 +3370,7 @@ check_mntbl(struct statfs *sb, int nsb)
 {
 	int	   i, j;
 	bool	   found;
-	sdev_t	   *dp;
+	sdev_t	   *devp;
 	const char *q, *mntpt;
 
 	for (i = 0; i < ndevs; i++) {
@@ -3378,56 +3378,56 @@ check_mntbl(struct statfs *sb, int nsb)
 			continue;
 		if (devs[i]->iface->type == IF_TYPE_FUSE)
 			continue;
-		dp = devs[i];
+		devp = devs[i];
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			q = devbasename(sb[j].f_mntfromname);
-			if (strcmp(devbasename(dp->dev), q) != 0) {
+			if (strcmp(devbasename(devp->dev), q) != 0) {
 				/*
 				 * Check if the device was mounted using its
 				 * glabel.
 				 */
-				found = match_glabel(dp, q);
+				found = match_glabel(devp, q);
 			} else
 				found = true;
 			if (found)
 				mntpt = sb[j].f_mntonname;
 		}
 		if (found) {
-			if (!dp->mounted || dp->mntpt == NULL) {
+			if (!devp->mounted || devp->mntpt == NULL) {
 				/* Mounted. */
-				dp->mntpt = strdup(mntpt);
-				if (dp->mntpt == NULL)
+				devp->mntpt = strdup(mntpt);
+				if (devp->mntpt == NULL)
 					err(EXIT_FAILURE, "strdup()");
-				dp->mounted = true;
+				devp->mounted = true;
 				cliprintbc(NULL, "M:dev=%s:mntpt=%s",
-				    dp->dev, dp->mntpt);
-			} else if (dp->mounted &&
-			    strcmp(dp->mntpt, mntpt) != 0) {
+				    devp->dev, devp->mntpt);
+			} else if (devp->mounted &&
+			    strcmp(devp->mntpt, mntpt) != 0) {
 				/* Remounted */
-				rmntpt(dp->mntpt);
+				rmntpt(devp->mntpt);
 				cliprintbc(NULL, "U:dev=%s:mntpt=%s",
-				    dp->dev, dp->mntpt);
-				free(dp->mntpt);
-				dp->mntpt = strdup(mntpt);
-				if (dp->mntpt == NULL)
+				    devp->dev, devp->mntpt);
+				free(devp->mntpt);
+				devp->mntpt = strdup(mntpt);
+				if (devp->mntpt == NULL)
 					err(EXIT_FAILURE, "strdup()");
 				cliprintbc(NULL, "M:dev=%s:mntpt=%s",
-				    dp->dev, dp->mntpt);
+				    devp->dev, devp->mntpt);
 			}
-		} else if (dp->mounted) {
-			if (dp->cmd_mounted) {
-				if (is_mntpt(dp->mntpt))
+		} else if (devp->mounted) {
+			if (devp->cmd_mounted) {
+				if (is_mntpt(devp->mntpt))
 					continue;
 			}	
 			/* Unmounted */
-			rmntpt(dp->mntpt);
+			rmntpt(devp->mntpt);
 			cliprintbc(NULL, "U:dev=%s:mntpt=%s",
-			    dp->dev, dp->mntpt);
+			    devp->dev, devp->mntpt);
 			/* Restore ownership in case we changed it. */
-			(void)change_owner(dp, dp->owner);
-			free(dp->mntpt);
-			dp->mntpt   = NULL;
-			dp->mounted = false;
+			(void)change_owner(devp, devp->owner);
+			free(devp->mntpt);
+			devp->mntpt   = NULL;
+			devp->mounted = false;
 		}
 	}
 }
