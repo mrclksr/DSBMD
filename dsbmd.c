@@ -320,10 +320,6 @@ main(int argc, char *argv[])
 	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer; 
 	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 
-	if (polliv <= 0)
-		polling = false;
-	else
-		polling = true;
 	for (i = 0; i < nfstypes; i++) {
 		switch (fstype[i].id) {
 		case UFS:
@@ -462,14 +458,18 @@ main(int argc, char *argv[])
 	if (fcntl(ls, F_SETFL, sflags) == -1)
 		err(EXIT_FAILURE, "fcntl()");
 
-	maxfd   = devd_sock > ls ? devd_sock : ls;
+	if (polliv <= 0)
+		polling = false;
+	else
+		polling = true;
 
 	/* Min. time interval for select() */
-	minsecs = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer < polliv ? \
-		  dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer : polliv;
+	minsecs = mntchkiv < polliv ? mntchkiv : polliv;
 
 	FD_ZERO(&allset);
 	FD_SET(ls, &allset); FD_SET(devd_sock, &allset);
+
+	maxfd = devd_sock > ls ? devd_sock : ls;
 
 	/* Main loop. */
 	for (polltime = mntchktime = 0;;) {
