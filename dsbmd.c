@@ -241,7 +241,7 @@ static dsbcfg_t *cfg	    = NULL;
 int
 main(int argc, char *argv[])
 {
-	int	       i, e, ls, sflags, maxfd, ch, devd_sock, minsecs;
+	int	       i, e, sflags, maxfd, ch, dsock, lsock, minsecs;
 	int	       mntchkiv, polliv;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag, polling;
@@ -431,31 +431,31 @@ main(int argc, char *argv[])
 	if (chdir("/") == -1)
 		err(EXIT_FAILURE, "chdir(/)");
 	/* Connect to devd. */
-	if ((devd_sock = devd_connect()) == -1)
+	if ((dsock = devd_connect()) == -1)
 		err(EXIT_FAILURE, "Couldn't connect to %s", PATH_DEVD_SOCKET);
 
 	/* Open the listening socket for the clients. */
         (void)unlink(PATH_DSBMD_SOCKET);
-	if ((ls = socket(AF_LOCAL, SOCK_STREAM, 0)) == -1)
+	if ((lsock = socket(AF_LOCAL, SOCK_STREAM, 0)) == -1)
 		err(EXIT_FAILURE, "socket()");
 	(void)memset((char *)&s_addr, 0, sizeof(s_addr));
 	(void)memcpy(s_addr.sun_path, PATH_DSBMD_SOCKET,
 	    strlen(PATH_DSBMD_SOCKET));
 	s_addr.sun_family = AF_LOCAL;
-	if (bind(ls, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
+	if (bind(lsock, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
 		err(EXIT_FAILURE, "bind()");
 	if (chmod(PATH_DSBMD_SOCKET, SOCKET_MODE) == -1)
 		err(EXIT_FAILURE, "chmod(%s)", PATH_DSBMD_SOCKET);
-	if (listen(ls, dsbcfg_getval(cfg, CFG_MAX_CLIENTS).integer) == -1)
+	if (listen(lsock, dsbcfg_getval(cfg, CFG_MAX_CLIENTS).integer) == -1)
 		err(EXIT_FAILURE, "listen()");
 	/*
 	 * Make the listening socket non blocking in order to protect the
 	 * server from certain DoS attacks.
 	 */
-	if ((sflags = fcntl(ls, F_GETFL)) == -1)
+	if ((sflags = fcntl(lsock, F_GETFL)) == -1)
 		err(EXIT_FAILURE, "fcntl()");
 	sflags |= O_NONBLOCK;
-	if (fcntl(ls, F_SETFL, sflags) == -1)
+	if (fcntl(lsock, F_SETFL, sflags) == -1)
 		err(EXIT_FAILURE, "fcntl()");
 
 	if (polliv <= 0)
@@ -467,9 +467,9 @@ main(int argc, char *argv[])
 	minsecs = mntchkiv < polliv ? mntchkiv : polliv;
 
 	FD_ZERO(&allset);
-	FD_SET(ls, &allset); FD_SET(devd_sock, &allset);
+	FD_SET(lsock, &allset); FD_SET(dsock, &allset);
 
-	maxfd = devd_sock > ls ? devd_sock : ls;
+	maxfd = dsock > lsock ? dsock : lsock;
 
 	/* Main loop. */
 	for (polltime = mntchktime = 0;;) {
@@ -492,29 +492,29 @@ main(int argc, char *argv[])
 				mntchktime = poll_mntbl();
 			continue;
 		}
-		if (FD_ISSET(devd_sock, &rset)) {
+		if (FD_ISSET(dsock, &rset)) {
 			/* New devd event. */
-			while ((ev = read_devd_event(devd_sock, &e)) != NULL)
+			while ((ev = read_devd_event(dsock, &e)) != NULL)
 				process_devd_event(ev);
 			if (e == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
-				FD_CLR(devd_sock, &allset);
-				(void)close(devd_sock);
+				FD_CLR(dsock, &allset);
+				(void)close(dsock);
 				logprintx("Lost connection to devd. " \
 				    "Reconnecting ...");
-				if ((devd_sock = devd_connect()) == -1) {
+				if ((dsock = devd_connect()) == -1) {
 					logprintx("Connecting to devd " \
 					    "failed. Giving up.");
 					exit(EXIT_FAILURE);
 				}
-				maxfd = devd_sock > ls ? devd_sock : ls;
-				FD_SET(devd_sock, &allset);
+				maxfd = dsock > lsock ? dsock : lsock;
+				FD_SET(dsock, &allset);
 			} else if (e == SOCK_ERR_IO_ERROR)
 				err(EXIT_FAILURE, "read_devd_event()");
 		} 
-		if (FD_ISSET(ls, &rset)) {
+		if (FD_ISSET(lsock, &rset)) {
 			/* A client has connected. */
-			if ((cli = process_connreq(ls)) != NULL) {
+			if ((cli = process_connreq(lsock)) != NULL) {
 				maxfd = maxfd > cli->s ? maxfd : cli->s;
 				FD_SET(cli->s, &allset);
 			}
