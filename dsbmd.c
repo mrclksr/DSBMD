@@ -241,7 +241,7 @@ static dsbcfg_t *cfg	    = NULL;
 int
 main(int argc, char *argv[])
 {
-	int	       i, e, sflags, maxfd, ch, dsock, lsock, minsecs;
+	int	       i, error, sflags, maxfd, ch, dsock, lsock, minsecs;
 	int	       mntchkiv, polliv;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag, polling;
@@ -494,9 +494,9 @@ main(int argc, char *argv[])
 		}
 		if (FD_ISSET(dsock, &rset)) {
 			/* New devd event. */
-			while ((ev = read_devd_event(dsock, &e)) != NULL)
+			while ((ev = read_devd_event(dsock, &error)) != NULL)
 				process_devd_event(ev);
-			if (e == SOCK_ERR_CONN_CLOSED) {
+			if (error == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
 				FD_CLR(dsock, &allset);
 				(void)close(dsock);
@@ -509,7 +509,7 @@ main(int argc, char *argv[])
 				}
 				maxfd = dsock > lsock ? dsock : lsock;
 				FD_SET(dsock, &allset);
-			} else if (e == SOCK_ERR_IO_ERROR)
+			} else if (error == SOCK_ERR_IO_ERROR)
 				err(EXIT_FAILURE, "read_devd_event()");
 		} 
 		if (FD_ISSET(lsock, &rset)) {
