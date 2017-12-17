@@ -1007,6 +1007,7 @@ update_device(sdev_t *devp)
 				return;
 			case ST_DATACD:
 			case ST_DVD:
+			case ST_BLURAY:
 				devp->fs = getfs(devp->dev);
 				if (devp->fs == NULL)
 					return;
@@ -2011,7 +2012,8 @@ get_optical_disk_type(const char *path)
 		goto error;
 	p   = buf + offset;
 	len = pbs - offset;
-	has_video_ts = has_mpeg2 = has_mpegav = has_svcd = has_vcd = false;
+	has_video_ts = has_mpeg2 = has_mpegav = false;
+	has_svcd = has_vcd = has_bdmv = false;
 	while (type == ST_DATACD && dirtblsz > 0) {
 		if (len <= ISO_DIRECTORY_RECORD_SIZE + 31) {
 			for (i = 0; i < len; i++)
