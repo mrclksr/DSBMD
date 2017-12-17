@@ -198,7 +198,8 @@ const storage_type_t storage_types[] = {
 	{ "USBDISK",	ST_USBDISK   },
 	{ "MTP",	ST_MTP	     },
 	{ "PTP",	ST_PTP	     },
-	{ "HDD",	ST_FUSE	     }
+	{ "HDD",	ST_FUSE	     },
+	{ "BLURAY",	ST_BLURAY    }
 };
 
 const iface_t interfaces[] = {
@@ -1934,7 +1935,8 @@ get_optical_disk_type(const char *path)
 	int    fd, lbs, seqnum, dirtblpos, dirtblsz, type, reclen;
 	int    i, len, sector, offset, saved_errno, namelen, pbs;
 	char   *buf, *p;
-	bool   has_video_ts, has_mpeg2, has_mpegav, has_svcd, has_vcd;
+	bool   has_video_ts, has_mpeg2, has_mpegav, has_svcd;
+	bool   has_vcd, has_bdmv;
 	off_t  msz;
 	struct ioc_toc_header tochdr;
         struct iso_directory_record *dp;
@@ -2037,6 +2039,8 @@ get_optical_disk_type(const char *path)
 				has_mpegav = true;
 			else if (!strncasecmp(dp->name, "MPEG2", namelen))
 				has_mpeg2 = true;
+			else if (!strncasecmp(dp->name, "BDMV", namelen))
+				has_bdmv = true;
 		}
 		if (has_video_ts)
 			type = ST_DVD;
@@ -2044,6 +2048,8 @@ get_optical_disk_type(const char *path)
 			type = ST_SVCD;
 		else if (has_mpegav && has_vcd)
 			type = ST_VCD;
+		else if (has_bdmv)
+			type = ST_BLURAY;
 		p	 += reclen;
 		len	 -= reclen;
 		dirtblsz -= reclen;

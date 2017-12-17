@@ -79,9 +79,9 @@ typedef enum DEV_TYPES {
 	ST_CDDA,	ST_USBDISK,
 	ST_DVD,		ST_DATACD,
 	ST_SVCD,	ST_UNKNOWN,
-	ST_VCD,		ST_PTP,
-	ST_MTP,		ST_USB_CARDREADER,
-	ST_FUSE
+	ST_VCD,		ST_BLURAY,
+	ST_PTP,		ST_MTP,
+	ST_FUSE,	ST_USB_CARDREADER
 } devt_t;
 
 typedef struct storage_type_s {
