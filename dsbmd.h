@@ -43,7 +43,7 @@
 #define NGLBLPRFX		5
 #define GLBLPRFX		{ NULL, "label", "ufs", "ufsid", "gptid" }
 
-#define PATH_DEVD_SOCKET	"/var/run/devd.pipe"
+#define PATH_DEVD_SOCKET	"/var/run/devd.seqpacket.pipe"
 
 #define SOCK_ERR_CONN_CLOSED	1
 #define SOCK_ERR_IO_ERROR	2
