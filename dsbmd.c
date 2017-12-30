@@ -495,8 +495,10 @@ main(int argc, char *argv[])
 		}
 		if (FD_ISSET(dsock, &rset)) {
 			/* New devd event. */
-			while ((ev = read_devd_event(dsock, &error)) != NULL)
+			if ((ev = read_devd_event(dsock, &error)) != NULL) {
+				warnx("ev: %s", ev);
 				process_devd_event(ev);
+			}
 			if (error == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
 				FD_CLR(dsock, &allset);
@@ -788,52 +790,50 @@ process_connreq(int ls)
 static char *
 read_devd_event(int s, int *error)
 {
-	int  i, n;
-	static char *lnbuf = NULL;
-	static int rd = 0, bufsz = 0, slen = 0;
-
+	int	      n, rd;
+	static int    bufsz = 0;
+	static char   seq[1024], *lnbuf = NULL;
+	struct iovec  iov;
+	struct msghdr msg;
+	
 	if (lnbuf == NULL) {
 		if ((lnbuf = malloc(_POSIX2_LINE_MAX)) == NULL)
 			return (NULL);
 		bufsz = _POSIX2_LINE_MAX;
 	}
+	iov.iov_len  = sizeof(seq);
+	iov.iov_base = seq;
+	msg.msg_iov  = &iov;
+	msg.msg_iovlen = 1;
 
-	*error = n = 0;
-	do {
-		rd += n;
-		if (slen > 0)
-			(void)memmove(lnbuf, lnbuf + slen, rd - slen);
-		rd  -= slen;
-		slen = 0;
-		for (i = 0; i < rd && lnbuf[i] != '\n'; i++)
-			;
-		if (i < rd) {
-			lnbuf[i] = '\0'; slen = i + 1;
-			if (slen == bufsz)
-				slen = rd = 0;
-			return (lnbuf);
+	for (n = rd = *error = 0;;) {
+		msg.msg_name = msg.msg_control = NULL;
+		msg.msg_namelen = msg.msg_controllen = 0;
+
+		if ((n = recvmsg(s, &msg, 0)) == (ssize_t)-1) {
+			if (errno == EINTR)
+				continue;
+			if (errno == ECONNRESET) {
+				*error = SOCK_ERR_CONN_CLOSED;
+				return (NULL);
+			}
+			if (errno == EAGAIN)
+				return (NULL);
+			err(EXIT_FAILURE, "recvmsg()");
 		}
-		if (rd == bufsz - 1) {
-			lnbuf = realloc(lnbuf, bufsz + _POSIX2_LINE_MAX);
-			if (lnbuf == NULL)
+		if (rd + n + 1 > bufsz) {
+			if ((lnbuf = realloc(lnbuf, rd + n + 65)) == NULL)
 				err(EXIT_FAILURE, "realloc()");
-			bufsz += 64;
+			bufsz = rd + n + 65;
 		}
-	} while ((n = read(s, lnbuf + rd, bufsz - rd - 1)) > 0);
-
-	if (n < 0) {
-		if (errno == EAGAIN || errno == EINTR) {
-			/* Just retry */
-			return (NULL);
-		}
+		(void)memcpy(lnbuf + rd, seq, n);
+		rd += n; lnbuf[rd] = '\0';
+		if (msg.msg_flags & MSG_TRUNC) {
+			logprint("recvmsg(): Message truncated");
+			return (rd > 0 ? lnbuf : NULL);
+		} else if (msg.msg_flags & MSG_EOR)
+			return (lnbuf);
 	}
-	if (errno == 0 || errno == ECONNRESET)
-		*error = SOCK_ERR_CONN_CLOSED;
-	else
-		*error = SOCK_ERR_IO_ERROR;
-	/* Error or lost connection */
-	slen = rd = 0;
-
 	return (NULL);
 }
 
@@ -2941,7 +2941,7 @@ uconnect(const char *path)
 	int s;
 	struct sockaddr_un saddr;
 
-	if ((s = socket(PF_LOCAL, SOCK_STREAM, 0)) == -1)
+	if ((s = socket(PF_LOCAL, SOCK_SEQPACKET, 0)) == -1)
 		return (-1);
 	(void)memset(&saddr, (unsigned char)0, sizeof(saddr));
 	(void)snprintf(saddr.sun_path, sizeof(saddr.sun_path), "%s", path);
