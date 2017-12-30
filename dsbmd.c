@@ -495,10 +495,8 @@ main(int argc, char *argv[])
 		}
 		if (FD_ISSET(dsock, &rset)) {
 			/* New devd event. */
-			if ((ev = read_devd_event(dsock, &error)) != NULL) {
-				warnx("ev: %s", ev);
+			if ((ev = read_devd_event(dsock, &error)) != NULL)
 				process_devd_event(ev);
-			}
 			if (error == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
 				FD_CLR(dsock, &allset);
