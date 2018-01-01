@@ -2954,6 +2954,8 @@ send_string(int socket, const char *str)
 {
 	fd_set wrset;
 
+	if (socket == -1)
+		return (-1);
 	FD_ZERO(&wrset); FD_SET(socket, &wrset);
 	while (select(socket + 1, 0, &wrset, 0, 0) == -1) {
 		if (errno != EINTR) {
