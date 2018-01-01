@@ -243,7 +243,7 @@ int
 main(int argc, char *argv[])
 {
 	int	       i, error, sflags, maxfd, ch, dsock, lsock, minsecs;
-	int	       mntchkiv, polliv;
+	int	       csock, mntchkiv, polliv;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag, polling;
 	FILE	       *fp;
@@ -521,12 +521,14 @@ main(int argc, char *argv[])
 			}
 		}
 		for (i = 0; i < nclients; i++) {
-			if (FD_ISSET(clients[i]->s, &rset)) {
-				int clisock = clients[i]->s;
-				if (serve_client(clients[i]) == -1) {
-					/* Disconnected */
-					FD_CLR(clisock, &allset);
-				}
+			if (!FD_ISSET(clients[i]->s, &rset))
+				continue;
+			csock = clients[i]->s;
+			if (serve_client(clients[i]) == -1 ||
+			    clients[i]->s == -1) {
+				/* Disconnected */
+				FD_CLR(csock, &allset);
+				del_client(clients[i--]);
 			}
 		}
 	}
@@ -680,7 +682,9 @@ del_client(client_t *cli)
 	if (i == nclients)
 		return;
 	logprintx("Client with UID %d disconnected", cli->uid);
-	(void)close(cli->s); free(cli->gids);
+	if (cli->s > -1)
+		(void)close(cli->s);
+	free(cli->gids);
 	free(cli);
 	
 	for (; i < nclients - 1; i++)
@@ -3073,17 +3077,18 @@ serve_client(client_t *cli)
 	 * sizeof(buf), or if it contains unprintable bytes, read
 	 * until end of line, and send the client an error message.
 	 */
-	do {
-		if ((n = client_readln(cli, &error)) > 0)
-			exec_cmd(cli, cli->buf);
-	} while (n > 0 && has_line(cli));
-
+	if ((n = client_readln(cli, &error)) > 0) {
+		exec_cmd(cli, cli->buf);
+		return (0);
+	}
 	if (n == 0)
 		return (0);
 	if (error == SOCK_ERR_IO_ERROR)
 		logprint("client_readln() error. Closing client connection");
 	/* Client disconnected or error. */
-	del_client(cli);
+	if (cli->s > -1)
+		(void)close(cli->s);
+	cli->s = -1;
 
 	return (-1);
 }
@@ -3266,7 +3271,9 @@ cmd_unmount(client_t *cli, char **argv)
 static void
 cmd_quit(client_t *cli, char **argv)
 {
-	del_client(cli);
+	if (cli->s > -1)
+		(void)close(cli->s);
+	cli->s = -1;
 }
 
 static time_t
