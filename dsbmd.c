@@ -701,61 +701,56 @@ static int
 client_readln(client_t *cli, int *error)
 {
 	int    i, n;
+	char   c;
 	bool   badchar;
-	size_t bufsz = sizeof(cli->buf) - 1;
+	size_t len, bufsz = sizeof(cli->buf) - 1;
 
-	*error = n = 0; badchar = false;
-	while (cli->slen > 0 ||
-	    ((n = read(cli->s, cli->buf + cli->rd, bufsz - cli->rd)) > 0)) {
-		cli->rd += n;
-
-		if (cli->slen > 0) {
-			(void)memmove(cli->buf, cli->buf + cli->slen,
-			    cli->rd - cli->slen);
+	*error = 0;
+	for (;;) {
+ 		if ((n = read(cli->s, &c, 1)) == -1) {
+			if (errno == EINTR) {
+				continue;
+			} else if (errno == EAGAIN) {
+				/* No more bytes available. */
+				return (0);
+			} else {
+				*error = SOCK_ERR_IO_ERROR;
+				return (-1);
+			}
+		} else if (n == 0) {
+			*error = SOCK_ERR_CONN_CLOSED;
+			return (-1);
 		}
-		cli->rd  -= cli->slen;
-		cli->slen = 0;
-		for (i = 0; i < cli->rd && cli->buf[i] != '\n'; i++) {
+		if (c == '\n')
+			break;
+		if (cli->overflow)
+			return (0);
+		cli->buf[cli->rd++] = (char)c;
+		if (cli->rd == bufsz) {
+			cli->overflow = true;
+			cli->rd = 0;
+		}
+	}
+	/* c == '\n' */
+	if (!cli->overflow)
+		cli->buf[cli->rd] = '\0';
+	len = cli->rd; cli->rd = 0;
+
+	if (cli->overflow) {
+		cli->overflow = false;
+		cliprint(cli, "E:code=%d\n", ERR_STRING_TOO_LONG);
+	} else {
+		badchar = false;
+		for (i = 0; i < len; i++) {
 			if (!isprint(cli->buf[i]))
 				badchar = true;
 		}
-		if (i < cli->rd) {
-			cli->buf[i] = '\0';
-			cli->slen = i + 1;
-			if (cli->overflow || badchar) {
-				if (cli->overflow) {
-					cli->overflow = false;
-					cliprint(cli, "E:code=%d\n",
-					    ERR_STRING_TOO_LONG);
-				}
-				if (badchar) {
-					cliprint(cli, "E:code=%d\n",
-					    ERR_BAD_STRING);
-					badchar = false;
-				}
-			} else
-				return (1);
-		} else if (cli->rd == bufsz) {
-			/* Line too long. Ignore all bytes until next '\n'. */
-			cli->overflow = true; cli->rd = 0;
-		}
-		n = 0;
+		if (badchar)
+			cliprint(cli, "E:code=%d\n", ERR_BAD_STRING);
+		else
+			return (1);
 	}
-	if (n == 0 || (n < 0 && errno == ECONNRESET)) {
-		/* Lost connection */
-		*error = SOCK_ERR_CONN_CLOSED;
-		return (-1);
-	} else {
-		/* n < 0 */
-		if (errno == EAGAIN || errno == EINTR) {
-			/* Just retry */
-			return (0);
-		} else
-			*error = SOCK_ERR_IO_ERROR;
-	}
-	cli->slen = cli->rd = 0;
-
-	return (-1);
+	return (0);
 }
 
 static client_t *
