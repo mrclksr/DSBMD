@@ -508,7 +508,7 @@ main(int argc, char *argv[])
 					    "failed. Giving up.");
 					exit(EXIT_FAILURE);
 				}
-				maxfd = dsock > lsock ? dsock : lsock;
+				maxfd = maxfd > dsock ? maxfd : dsock;
 				FD_SET(dsock, &allset);
 			} else if (error == SOCK_ERR_IO_ERROR)
 				err(EXIT_FAILURE, "read_devd_event()");
