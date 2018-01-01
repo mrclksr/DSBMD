@@ -692,12 +692,6 @@ del_client(client_t *cli)
 	nclients--;
 }
 
-static bool
-has_line(client_t *cli)
-{
-	return (cli->slen > 0 ? true : false);
-}
-
 /*
  * Return a value > 0 if a newline terminated string is available.
  * Return 0 if there is no new line terminated string available.
