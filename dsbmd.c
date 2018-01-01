@@ -3007,7 +3007,11 @@ cliprintbc(client_t *exclude, const char *fmt, ...)
 		(void)vsnprintf(clients[i]->msg, sizeof(clients[i]->msg) - 2,
 		    fmt, ap);
 		(void)strcat(clients[i]->msg, "\n");
-		(void)send_string(clients[i]->s, clients[i]->msg);
+		if (send_string(clients[i]->s, clients[i]->msg) == -1 &&
+		    errno == EPIPE) {
+			/* Client disconnected */
+			clisock_close(clients[i]);
+		}
 	}
 	errno = saved_errno;
 }
