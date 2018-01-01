@@ -2982,7 +2982,12 @@ cliprint(client_t *cli, const char *fmt, ...)
 	va_start(ap, fmt);
 	(void)vsnprintf(cli->msg, sizeof(cli->msg) - 2, fmt, ap);
 	(void)strcat(cli->msg, "\n");
-	(void)send_string(cli->s, cli->msg);
+	if (send_string(cli->s, cli->msg) == -1 && errno == EPIPE) {
+		/* Client disconnected */
+		if (cli->s != -1)
+			(void)close(cli->s);
+		cli->s = -1;
+	}
 	errno = saved_errno;
 }
 
@@ -3068,6 +3073,7 @@ static int
 serve_client(client_t *cli)
 {
 	int n, error;
+
 	/*
 	 * Read a line from socket. If the line is longer than
 	 * sizeof(buf), or if it contains unprintable bytes, read
