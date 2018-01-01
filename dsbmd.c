@@ -145,6 +145,7 @@ static void	rmntpt(const char *);
 static void	cleanup(int);
 static void	del_device(sdev_t *);
 static void	del_client(client_t *);
+static void	clisock_close(client_t *);
 static void	update_device(sdev_t *);
 static void	parse_devd_event(char *);
 static void	free_iovec(struct iovec *);
@@ -2944,6 +2945,14 @@ uconnect(const char *path)
 	return (s);
 }
 
+static void
+clisock_close(client_t *cli)
+{
+	if (cli->s > -1)
+		(void)close(cli->s);
+	cli->s = -1;
+}
+
 static int
 send_string(int socket, const char *str)
 {
@@ -2979,9 +2988,7 @@ cliprint(client_t *cli, const char *fmt, ...)
 	(void)strcat(cli->msg, "\n");
 	if (send_string(cli->s, cli->msg) == -1 && errno == EPIPE) {
 		/* Client disconnected */
-		if (cli->s != -1)
-			(void)close(cli->s);
-		cli->s = -1;
+		clisock_close(cli);
 	}
 	errno = saved_errno;
 }
@@ -3083,9 +3090,7 @@ serve_client(client_t *cli)
 	if (error == SOCK_ERR_IO_ERROR)
 		logprint("client_readln() error. Closing client connection");
 	/* Client disconnected or error. */
-	if (cli->s > -1)
-		(void)close(cli->s);
-	cli->s = -1;
+	clisock_close(cli);
 
 	return (-1);
 }
@@ -3265,12 +3270,11 @@ cmd_unmount(client_t *cli, char **argv)
 	(void)unmount_device(cli, devp, force, false);
 }
 
+
 static void
 cmd_quit(client_t *cli, char **argv)
 {
-	if (cli->s > -1)
-		(void)close(cli->s);
-	cli->s = -1;
+	clisock_close(cli);
 }
 
 static time_t
