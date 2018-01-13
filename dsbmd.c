@@ -29,6 +29,7 @@
 #include <signal.h>
 #include <ctype.h>
 #include <limits.h>
+#include <pthread.h>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <sys/socket.h>
@@ -135,6 +136,7 @@ static char	*get_diskname(const char *);
 static char	*get_lvm_dev(const char *);
 static char	*dev_from_gptid(const char *);
 static char	*ugen_to_gphoto_port(const char *);
+static void	*poll_thr(void *);
 static void	lockpidfile(void);
 static void	process_devd_event(char *);
 static void	usage(void);
@@ -166,7 +168,6 @@ static void	check_mntbl(struct statfs *, int);
 static void	check_fuse_mount(struct statfs *, int);
 static void	check_fuse_unmount(struct statfs *, int);
 static time_t	poll_mntbl(void);
-static time_t	do_poll(void);
 static sdev_t	*add_device(const char *);
 static sdev_t	*add_ptp_device(const char *);
 static sdev_t	*add_mtp_device(const char *);
@@ -175,6 +176,7 @@ static sdev_t	*lookup_dev(const char *);
 static client_t	*add_client(int);
 static client_t	*process_connreq(int);
 static const storage_type_t *get_storage_type(const char *);
+
 
 /*
  * Struct to represent the fields of a devd notify event.
@@ -229,6 +231,14 @@ struct command_s {
 	{ "size",	&cmd_size    }
 };
 
+/* 
+ * Struct to represent a message sent from the poll thread
+ * to the main thread.
+ */
+struct pollmsg_s {
+	sdev_t *devp;
+};
+
 static int	nclients    = 0;	/* # of connected clients. */
 static int	ndevs	    = 0;	/* # of devs. */
 static int	queuesz	    = 0;	/* # of devices in poll queue. */
@@ -243,20 +253,22 @@ static dsbcfg_t *cfg	    = NULL;
 int
 main(int argc, char *argv[])
 {
-	int	       i, error, sflags, maxfd, ch, dsock, lsock, minsecs;
-	int	       csock, mntchkiv, polliv;
+	int	       i, error, sflags, maxfd, ch, dsock, lsock;
+	int	       csock, mntchkiv, pollsv[2];
 	DIR	       *dirp, *dirp2;
-	bool	       fflag, polling;
+	bool	       fflag;
 	FILE	       *fp;
 	char	       lvmpath[512], *ev, **v;
-	time_t	       polltime, mntchktime;
+	time_t	       mntchktime;
 	fd_set	       allset, rset;
 	client_t       *cli;
+	pthread_t      tid;
 	struct stat    sb;
 	struct group   *gr;
 	struct passwd  *pw;
 	struct dirent  *dp, *dp2;
 	struct timeval tv;
+	struct pollmsg_s pmsg;
 	struct sockaddr_un s_addr;
 
 	fflag = false;
@@ -319,8 +331,6 @@ main(int argc, char *argv[])
 				logprint("kldload(%s)", *v);
 		}
 	}
-	polliv   = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
-	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer; 
 
 	for (i = 0; i < nfstypes; i++) {
 		switch (fstype[i].id) {
@@ -460,27 +470,30 @@ main(int argc, char *argv[])
 	if (fcntl(lsock, F_SETFL, sflags) == -1)
 		err(EXIT_FAILURE, "fcntl()");
 
-	if (polliv <= 0)
-		polling = false;
-	else
-		polling = true;
-
-	/* Min. time interval for select() */
-	minsecs = mntchkiv < polliv ? mntchkiv : polliv;
+	/* Timeout for select() */
+	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer;
 
 	FD_ZERO(&allset);
 	FD_SET(lsock, &allset); FD_SET(dsock, &allset);
 
 	maxfd = dsock > lsock ? dsock : lsock;
 
+	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer > 0) {
+		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, pollsv) == -1)
+			err(EXIT_FAILURE, "socketpair()");
+		maxfd = maxfd > pollsv[0] ? maxfd : pollsv[0];
+		FD_SET(pollsv[0], &allset);
+
+		if (pthread_create(&tid, NULL, poll_thr, &pollsv[1]) != 0)
+			err(EXIT_FAILURE, "pthread_create()");
+		(void)pthread_detach(tid);
+	}
 	/* Main loop. */
-	for (polltime = mntchktime = 0;;) {
+	for (mntchktime = 0;;) {
 		rset = allset;
-		tv.tv_sec = minsecs; tv.tv_usec = 0;
+		tv.tv_sec = mntchkiv; tv.tv_usec = 0;
 		if (time(NULL) - mntchktime >= mntchkiv) 
 			mntchktime = poll_mntbl();
-		if (polling && difftime(time(NULL), polltime) >= polliv)
-			polltime = do_poll();
 		switch (select(maxfd + 1, &rset, NULL, NULL, &tv)) {
 		case -1:
 			if (errno == EINTR)
@@ -488,10 +501,7 @@ main(int argc, char *argv[])
 			err(EXIT_FAILURE, "select()");
 			/* NOTREACHED */
 		case 0:
-			if (polling && difftime(time(NULL), polltime) >= polliv)
-				polltime = do_poll();
-			if (time(NULL) - mntchktime >= mntchkiv) 
-				mntchktime = poll_mntbl();
+			mntchktime = poll_mntbl();
 			continue;
 		}
 		if (FD_ISSET(dsock, &rset)) {
@@ -520,6 +530,16 @@ main(int argc, char *argv[])
 				maxfd = maxfd > cli->s ? maxfd : cli->s;
 				FD_SET(cli->s, &allset);
 			}
+		}
+		if (FD_ISSET(pollsv[0], &rset)) {
+			/* Polled device changed. */
+			if (recv(pollsv[0], &pmsg, sizeof(pmsg),
+			    MSG_WAITALL) == -1) {
+				if (errno == EINTR)
+					continue;
+				err(EXIT_FAILURE, "recv()");
+			}
+			update_device(pmsg.devp);
 		}
 		for (i = 0; i < nclients; i++) {
 			if (!FD_ISSET(clients[i]->s, &rset))
@@ -876,6 +896,25 @@ parse_devd_event(char *str)
 	}
 }
 
+
+static void *
+poll_thr(void *socket)
+{
+	int	s, polliv;
+	sdev_t *devp;
+	struct pollmsg_s msg;
+
+ 	s = *(int *)socket;
+	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
+	for (;; sleep(polliv)) {
+		while ((devp = media_changed()) != NULL) {
+			msg.devp = devp;
+			(void)send(s, &msg, sizeof(msg), MSG_EOR);
+		}
+	}
+	return (NULL);
+}
+
 static void
 add_to_pollqueue(sdev_t *devp)
 {
@@ -942,16 +981,6 @@ has_media(const char *dev)
 	(void)close(fd);
 
 	return (media);
-}
-
-static time_t
-do_poll()
-{
-	sdev_t *devp;
-
-	while ((devp = media_changed()) != NULL)
-		update_device(devp);
-	return (time(NULL));
 }
 
 /*
