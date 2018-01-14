@@ -257,7 +257,7 @@ main(int argc, char *argv[])
 	int	       i, error, sflags, maxfd, ch, dsock, lsock;
 	int	       csock, mntchkiv, pollsv[2];
 	DIR	       *dirp, *dirp2;
-	bool	       fflag;
+	bool	       fflag, polling;
 	FILE	       *fp;
 	char	       lvmpath[512], *ev, **v;
 	time_t	       mntchktime;
@@ -473,7 +473,12 @@ main(int argc, char *argv[])
 
 	/* Timeout for select() */
 	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer;
-
+	if (mntchkiv <= 0) {
+		logprintx("%s <= 0. Assuming %s = 1",
+		    dsbcfg_varname(cfg, CFG_MNTCHK_INTERVAL),
+		    dsbcfg_varname(cfg, CFG_MNTCHK_INTERVAL));
+		mntchkiv = 1;
+	}
 	FD_ZERO(&allset);
 	FD_SET(lsock, &allset); FD_SET(dsock, &allset);
 
@@ -484,13 +489,15 @@ main(int argc, char *argv[])
 	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer > 0) {
 		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, pollsv) == -1)
 			err(EXIT_FAILURE, "socketpair()");
+		polling = true;
 		maxfd = maxfd > pollsv[0] ? maxfd : pollsv[0];
 		FD_SET(pollsv[0], &allset);
 
 		if (pthread_create(&tid, NULL, poll_thr, &pollsv[1]) != 0)
 			err(EXIT_FAILURE, "pthread_create()");
 		(void)pthread_detach(tid);
-	}
+	} else
+		polling = false;
 	/* Main loop. */
 	for (mntchktime = 0;;) {
 		rset = allset;
@@ -534,7 +541,7 @@ main(int argc, char *argv[])
 				FD_SET(cli->s, &allset);
 			}
 		}
-		if (FD_ISSET(pollsv[0], &rset)) {
+		if (polling && FD_ISSET(pollsv[0], &rset)) {
 			/* Polled device changed. */
 			if (recv(pollsv[0], &pmsg, sizeof(pmsg),
 			    MSG_WAITALL) == -1) {
