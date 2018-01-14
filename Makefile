@@ -31,6 +31,13 @@ ${RCSCRIPT}: ${RCSCRIPT}.tmpl
 	    -e 's|@PATH_PIDFILE@|${PIDFILE}|g' \
 	< ${.ALLSRC} > ${RCSCRIPT}
 
+${CFGFILE}: ${CFGFILE}.tmpl
+	# Remove "large" mount option from config file on FreeBSD >= 12
+	version=`freebsd-version -u | awk -F"[.-]" '{ print $$1 }'`; \
+	if [ $${version} -ge 12 ]; then \
+		sed 's|large,||g' ${CFGFILE}.tmpl > ${CFGFILE}; \
+	else cp ${CFGFILE}.tmpl ${CFGFILE}; fi
+
 install: ${PROGRAM} ${RCSCRIPT} ${CFGFILE}
 	${BSD_INSTALL_PROGRAM} ${PROGRAM} ${DESTDIR}${BINDIR}
 	${BSD_INSTALL_SCRIPT} ${RCSCRIPT} ${DESTDIR}${RCDIR}
@@ -52,4 +59,5 @@ readme: readme.mdoc
 clean:
 	-rm -f ${PROGRAM}
 	-rm -f ${RCSCRIPT}
+	-rm -f ${CFGFILE}
 
