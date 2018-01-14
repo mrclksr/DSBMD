@@ -45,7 +45,9 @@ install: ${PROGRAM} ${RCSCRIPT} ${CFGFILE}
 	if [ ! -f ${DESTDIR}${CFGDIR}/${CFGFILE} ]; then \
 		${BSD_INSTALL_DATA} ${CFGFILE} ${DESTDIR}${CFGDIR}; \
 	fi
-	-@mkdir ${DESTDIR}${DOCSDIR}
+	if [ ! -d ${DESTDIR}${DOCSDIR} ]; then \
+		mkdir ${DESTDIR}${DOCSDIR}; \
+	fi
 	${BSD_INSTALL_DATA} ${DOCS} ${DESTDIR}${DOCSDIR}
 
 readme: readme.mdoc
