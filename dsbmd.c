@@ -1621,7 +1621,8 @@ mount_device(client_t *cli, sdev_t *devp)
 		    devp->mntpt, cli->uid);
 		return (0);
 	}
-	cliprint(cli, "E:command=mount:code=%d", errno);
+	cliprint(cli, "E:command=mount:code=%d",
+	    errno == 0 ? ERR_UNKNOWN_ERROR : errno);
 	logprint("Mounting of %s by UID %d failed", devp->dev, cli->uid);
 	(void)change_owner(devp, devp->owner);
 	rmntpt(mntpath);
