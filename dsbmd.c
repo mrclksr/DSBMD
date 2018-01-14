@@ -249,6 +249,7 @@ static sdev_t	**pollqueue = NULL;	/* List of devices to poll. */
 static sdev_t	**devs      = NULL;	/* List of mountable devs. */
 static client_t **clients   = NULL;	/* List of connected clients. */
 static dsbcfg_t *cfg	    = NULL;
+static pthread_mutex_t pollqmtx;
 
 int
 main(int argc, char *argv[])
@@ -477,6 +478,8 @@ main(int argc, char *argv[])
 	FD_SET(lsock, &allset); FD_SET(dsock, &allset);
 
 	maxfd = dsock > lsock ? dsock : lsock;
+
+	(void)pthread_mutex_init(&pollqmtx, NULL);
 
 	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer > 0) {
 		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, pollsv) == -1)
@@ -907,10 +910,12 @@ poll_thr(void *socket)
  	s = *(int *)socket;
 	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 	for (;; sleep(polliv)) {
+		(void)pthread_mutex_lock(&pollqmtx);
 		while ((devp = media_changed()) != NULL) {
 			msg.devp = devp;
 			(void)send(s, &msg, sizeof(msg), MSG_EOR);
 		}
+		(void)pthread_mutex_unlock(&pollqmtx);
 	}
 	return (NULL);
 }
@@ -921,6 +926,7 @@ add_to_pollqueue(sdev_t *devp)
 	int   i, len;
 	char *p;
 
+	(void)pthread_mutex_lock(&pollqmtx);
 	for (p = devp->dev; !isdigit(*p); p++)
 		;
 	if (p[1] == '\0')
@@ -933,8 +939,10 @@ add_to_pollqueue(sdev_t *devp)
 		len = p - devp->dev + 1;
 	}
 	for (i = 0; i < queuesz; i++) {
-		if (strncmp(devp->dev, pollqueue[i]->dev, len) == 0)
+		if (strncmp(devp->dev, pollqueue[i]->dev, len) == 0) {
+			(void)pthread_mutex_unlock(&pollqmtx);
 			return;
+		}
 	}
 	if ((pollqueue = realloc(pollqueue,
 	    sizeof(sdev_t *) * (queuesz + 1))) == NULL)
@@ -942,6 +950,7 @@ add_to_pollqueue(sdev_t *devp)
 	pollqueue[queuesz] = devp;
 	pollqueue[queuesz]->has_media = has_media(devp->dev);
 	queuesz++;
+	(void)pthread_mutex_unlock(&pollqmtx);
 }
 
 static void
@@ -949,13 +958,17 @@ del_from_pollqueue(sdev_t *devp)
 {
 	int i;
 
+	(void)pthread_mutex_lock(&pollqmtx);
 	for (i = 0; i < queuesz &&  devp != pollqueue[i]; i++)
 		;
-	if (i == queuesz)
+	if (i == queuesz) {
+		(void)pthread_mutex_unlock(&pollqmtx);
 		return;
+	}
 	for (; i < queuesz - 1; i++)
 		pollqueue[i] = pollqueue[i + 1];
 	queuesz--;
+	(void)pthread_mutex_unlock(&pollqmtx);
 }
 
 static bool
