@@ -92,6 +92,10 @@
 #define USB_SUBCLASS_PTP   0x01
 #define USB_PROTOCOL_PTP   0x01
 
+#define die(msg, ...) do { \
+	logprint(msg, ##__VA_ARGS__); exit(EXIT_FAILURE); \
+} while (0)
+
 #define INITFS(i, ID) do {						     \
 	fstype[i].mntcmd   = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD).string;   \
 	fstype[i].mntcmd_u = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD_U).string; \
@@ -176,7 +180,6 @@ static sdev_t	*lookup_dev(const char *);
 static client_t	*add_client(int);
 static client_t	*process_connreq(int);
 static const storage_type_t *get_storage_type(const char *);
-
 
 /*
  * Struct to represent the fields of a devd notify event.
@@ -406,9 +409,9 @@ main(int argc, char *argv[])
 
 	/* Get all currently installed disks. */
 	if (chdir(_PATH_DEV) == -1)
-		err(EXIT_FAILURE, "chdir(%s)", _PATH_DEV);
+		die("chdir(%s)", _PATH_DEV);
 	if ((dirp = opendir(".")) == NULL)
-		err(EXIT_FAILURE, "opendir(%s)", _PATH_DEV);
+		die("opendir(%s)", _PATH_DEV);
 	while ((dp = readdir(dirp)) != NULL) {
 		if (strcmp(dp->d_name, ".")  == 0 ||
 		    strcmp(dp->d_name, "..") == 0)
@@ -442,34 +445,34 @@ main(int argc, char *argv[])
 	}
 	(void)closedir(dirp);
 	if (chdir("/") == -1)
-		err(EXIT_FAILURE, "chdir(/)");
+		die("chdir(/)");
 	/* Connect to devd. */
 	if ((dsock = devd_connect()) == -1)
-		err(EXIT_FAILURE, "Couldn't connect to %s", PATH_DEVD_SOCKET);
+		die("Couldn't connect to %s", PATH_DEVD_SOCKET);
 
 	/* Open the listening socket for the clients. */
         (void)unlink(PATH_DSBMD_SOCKET);
 	if ((lsock = socket(AF_LOCAL, SOCK_STREAM, 0)) == -1)
-		err(EXIT_FAILURE, "socket()");
+		die("socket()");
 	(void)memset((char *)&s_addr, 0, sizeof(s_addr));
 	(void)memcpy(s_addr.sun_path, PATH_DSBMD_SOCKET,
 	    strlen(PATH_DSBMD_SOCKET));
 	s_addr.sun_family = AF_LOCAL;
 	if (bind(lsock, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
-		err(EXIT_FAILURE, "bind()");
+		die("bind()");
 	if (chmod(PATH_DSBMD_SOCKET, SOCKET_MODE) == -1)
-		err(EXIT_FAILURE, "chmod(%s)", PATH_DSBMD_SOCKET);
+		die("chmod(%s)", PATH_DSBMD_SOCKET);
 	if (listen(lsock, dsbcfg_getval(cfg, CFG_MAX_CLIENTS).integer) == -1)
-		err(EXIT_FAILURE, "listen()");
+		die("listen()");
 	/*
 	 * Make the listening socket non blocking in order to protect the
 	 * server from certain DoS attacks.
 	 */
 	if ((sflags = fcntl(lsock, F_GETFL)) == -1)
-		err(EXIT_FAILURE, "fcntl()");
+		die("fcntl()");
 	sflags |= O_NONBLOCK;
 	if (fcntl(lsock, F_SETFL, sflags) == -1)
-		err(EXIT_FAILURE, "fcntl()");
+		die("fcntl()");
 
 	/* Timeout for select() */
 	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer;
@@ -488,13 +491,13 @@ main(int argc, char *argv[])
 
 	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer > 0) {
 		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, pollsv) == -1)
-			err(EXIT_FAILURE, "socketpair()");
+			die("socketpair()");
 		polling = true;
 		maxfd = maxfd > pollsv[0] ? maxfd : pollsv[0];
 		FD_SET(pollsv[0], &allset);
 
 		if (pthread_create(&tid, NULL, poll_thr, &pollsv[1]) != 0)
-			err(EXIT_FAILURE, "pthread_create()");
+			die("pthread_create()");
 		(void)pthread_detach(tid);
 	} else
 		polling = false;
@@ -508,7 +511,7 @@ main(int argc, char *argv[])
 		case -1:
 			if (errno == EINTR)
 				continue;
-			err(EXIT_FAILURE, "select()");
+			die("select()");
 			/* NOTREACHED */
 		case 0:
 			mntchktime = poll_mntbl();
@@ -532,7 +535,7 @@ main(int argc, char *argv[])
 				maxfd = maxfd > dsock ? maxfd : dsock;
 				FD_SET(dsock, &allset);
 			} else if (error == SOCK_ERR_IO_ERROR)
-				err(EXIT_FAILURE, "read_devd_event()");
+				die("read_devd_event()");
 		} 
 		if (FD_ISSET(lsock, &rset)) {
 			/* A client has connected. */
@@ -547,7 +550,7 @@ main(int argc, char *argv[])
 			    MSG_WAITALL) == -1) {
 				if (errno == EINTR)
 					continue;
-				err(EXIT_FAILURE, "recv()");
+				die("recv()");
 			}
 			update_device(pmsg.devp);
 		}
@@ -589,10 +592,10 @@ lockpidfile()
 	/* Check if deamon is already running. */
 	if ((lockfp = fopen(PATH_PID_FILE, "r+")) == NULL) {
 		if (errno != ENOENT)
-			err(EXIT_FAILURE, "fopen(%s)", PATH_PID_FILE);
+			die("fopen(%s)", PATH_PID_FILE);
 		/* Not running - Create the PID/lock file. */
 		if ((lockfp = fopen(PATH_PID_FILE, "w")) == NULL) {
-			err(EXIT_FAILURE, "couldn't create pid file %s",
+			die("couldn't create pid file %s",
 			    PATH_PID_FILE);
 		}
 	}
@@ -601,7 +604,7 @@ lockpidfile()
 			/* Daemon already running. */
 			errx(EXIT_FAILURE, "%s is already running.", PROGRAM);
 		} else
-			err(EXIT_FAILURE, "flock()");
+			die("flock()");
 	}
 	/* Write our PID to the PID/lock file. */
 	(void)fprintf(lockfp, "%d", getpid());
@@ -798,7 +801,7 @@ process_connreq(int ls)
 		case EINTR: case EWOULDBLOCK: case ECONNABORTED:
 			return (NULL);
 		default:
-			err(EXIT_FAILURE, "accept()");
+			die("accept()");
 		}
 	}
 	if ((cli = add_client(cs)) == NULL) {
@@ -841,11 +844,11 @@ read_devd_event(int s, int *error)
 			}
 			if (errno == EAGAIN)
 				return (NULL);
-			err(EXIT_FAILURE, "recvmsg()");
+			die("recvmsg()");
 		}
 		if (rd + n + 1 > bufsz) {
 			if ((lnbuf = realloc(lnbuf, rd + n + 65)) == NULL)
-				err(EXIT_FAILURE, "realloc()");
+				die("realloc()");
 			bufsz = rd + n + 65;
 		}
 		(void)memcpy(lnbuf + rd, seq, n);
@@ -953,7 +956,7 @@ add_to_pollqueue(sdev_t *devp)
 	}
 	if ((pollqueue = realloc(pollqueue,
 	    sizeof(sdev_t *) * (queuesz + 1))) == NULL)
-		err(EXIT_FAILURE, "realloc()");
+		die("realloc()");
 	pollqueue[queuesz] = devp;
 	pollqueue[queuesz]->has_media = has_media(devp->dev);
 	queuesz++;
@@ -1061,9 +1064,9 @@ update_device(sdev_t *devp)
 		}
 		if ((p = get_label(devp->dev, devp->fs->name)) != NULL) {
 			if ((devp->name = strdup(p)) == NULL)
-				err(EXIT_FAILURE, "strdup()");
+				die("strdup()");
 		} else if ((devp->name = strdup(devbasename(devp->dev))) == NULL)
-			err(EXIT_FAILURE, "strdup()");
+			die("strdup()");
 		devp->visible = true;
 		notifybc(devp, true);
 	} else {
@@ -1308,7 +1311,7 @@ switcheids(uid_t euid, gid_t egid)
 	endpwent();
 	if (geteuid() == 0) {
 		if (initgroups(pw->pw_name, pw->pw_gid) == -1)
-			err(EXIT_FAILURE, "initgroups()");
+			die("initgroups()");
 	}
 	if (setegid(egid) == -1)
 		logprint("setegid(%u)", egid);
@@ -1332,9 +1335,9 @@ setuserenv(uid_t uid)
 	}
 	endpwent();
 	if ((lc = login_getpwclass(pw)) == NULL)
-		err(EXIT_FAILURE, "login_getpwclass()");
+		die("login_getpwclass()");
 	if (setusercontext(lc, pw, pw->pw_uid, LOGIN_SETALL) == -1)
-		err(EXIT_FAILURE, "setusercontext()");
+		die("setusercontext()");
 }
 
 static void
@@ -1382,7 +1385,7 @@ ssystem(uid_t uid, const char *cmd)
 
 	switch ((pid = vfork())) {
 	case -1:
-		err(EXIT_FAILURE, "vfork()");
+		die("vfork()");
 		/* NOTREACHED */
 	case  0:
 		setuserenv(uid);
@@ -1401,7 +1404,7 @@ ssystem(uid_t uid, const char *cmd)
 		if (ret == (pid_t)-1 && errno == EINTR)
 			continue;
 		else if (ret == (pid_t)-1)
-			err(EXIT_FAILURE, "waitpid()");
+			die("waitpid()");
 		else if (ret == pid)
 			return (status == 255 ? -1 : status);
 		(void)sleep(1);
@@ -1419,7 +1422,7 @@ ssystem(uid_t uid, const char *cmd)
 				if (ret == (pid_t)-1 && errno == EINTR)
 					continue;
 				else if (ret == (pid_t)-1)
-					err(EXIT_FAILURE, "waitpid()");
+					die("waitpid()");
 				else if (ret == pid)
 					return (status == 255 ? -1 : status);
 				(void)sleep(1);
@@ -1456,7 +1459,7 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 	    extend_iovec(iov, iovlen, "cs_local", locale) == -1		||
 	    extend_iovec(iov, iovlen, "cs_dos", locale) == -1		||
 	    extend_iovec(iov, iovlen, "kiconv", "") == -1)
-		err(EXIT_FAILURE, "extend_iovec()");
+		die("extend_iovec()");
 	(void)kiconv_add_xlat16_cspair(locale, locale,
 	    KICONV_FROM_UPPER | KICONV_LOWER);
 
@@ -1475,17 +1478,17 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts,
 	if (extend_iovec(&iov, &iovlen, "fstype", fs) == -1  ||
 	    extend_iovec(&iov, &iovlen, "fspath", dir) == -1 ||
 	    extend_iovec(&iov, &iovlen, "from", dev) == -1) 
-		err(EXIT_FAILURE, "extend_iovec()");
+		die("extend_iovec()");
 	if (opts != NULL) {
 		if ((op = strdup(opts)) == NULL)
-			err(EXIT_FAILURE, "strdup()");
+			die("strdup()");
 		for (p = op; (p = strtok(p, ",")) != NULL; p = NULL) {
 			if ((q = strchr(p, '=')) == NULL)
 				q = "";
 			else
 				*q++ = '\0';
 			if (extend_iovec(&iov, &iovlen, p, q) == -1)
-				err(EXIT_FAILURE, "extend_iovec()");
+				die("extend_iovec()");
 		}
 		free(op);
 	}
@@ -1591,7 +1594,7 @@ mount_device(client_t *cli, sdev_t *devp)
 	}
 	mntpath = mkmntpt(devp);
 	if (chown(mntpath, cli->uid, cli->gids[0]) == -1)
-		err(EXIT_FAILURE, "chown(%s)", mntpath);
+		die("chown(%s)", mntpath);
 	if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set()) {
 		/*
 		 * Change the owner of the device so that the user
@@ -1618,7 +1621,7 @@ mount_device(client_t *cli, sdev_t *devp)
 	    cli->gids[0])) {
 		free(mntpath);
 		if (getmntpt(devp) == NULL)
-			err(EXIT_FAILURE, "getmntpt()");
+			die("getmntpt()");
 		devp->mounted = true;
 		devp->cmd_mounted = false;
 		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s", devp->dev,
@@ -1779,7 +1782,7 @@ mkmntpt(const sdev_t *devp)
 		errx(EXIT_FAILURE, "mount_dir undefined");
 	if (mkdir(mntdir, MNTDIRPERM) == -1) {
 		if (errno != EEXIST)
-			err(EXIT_FAILURE, "mkdir(%s)", mntdir);
+			die("mkdir(%s)", mntdir);
 	}
 	/* Skip directory part in case of Linux LV */
 	if ((p = strchr(devp->name, '/')) != NULL)
@@ -1793,14 +1796,14 @@ mkmntpt(const sdev_t *devp)
 	pathlen += (namelen < devlen ? devlen : namelen) + 2;
 
 	if ((mntpath = malloc(pathlen)) == NULL)
-		err(EXIT_FAILURE, "malloc()");
+		die("malloc()");
 	(void)sprintf(mntpath, "%s/%s", mntdir, p);
 
 	if (stat(mntpath, &sb) == -1 && errno != ENOENT)
-		err(EXIT_FAILURE, "stat(%s)", mntpath);
+		die("stat(%s)", mntpath);
 	else if (errno == ENOENT) {
 		if (mkdir(mntpath, MNTPTMODE) == -1)
-			err(EXIT_FAILURE, "mkdir(%s)", mntpath);
+			die("mkdir(%s)", mntpath);
 	} else {
 		/* 
 		 * File exists.  If  the  file  isn't  a  directory, or a
@@ -1811,7 +1814,7 @@ mkmntpt(const sdev_t *devp)
 		if (!S_ISDIR(sb.st_mode) || rmdir(mntpath) == -1) {
 			free(mntpath);
 			if ((mntpath = malloc(MNAMELEN)) == NULL)
-				err(EXIT_FAILURE, "malloc()");
+				die("malloc()");
 			if (strcmp(devbasename(devp->dev), devp->name) != 0) {
 				/*
 				 * If  the  device's  devname is != its vol ID
@@ -1823,8 +1826,7 @@ mkmntpt(const sdev_t *devp)
 				    mntdir, devbasename(devp->dev));
 				if (mkdir(mntpath, MNTPTMODE) == -1) {
 					if (errno != EEXIST)
-						err(EXIT_FAILURE, "mkdir(%s)",
-						    mntpath);
+						die("mkdir(%s)", mntpath);
 				} else
 					return (mntpath);
 			}
@@ -1834,11 +1836,11 @@ mkmntpt(const sdev_t *devp)
 			(void)snprintf(mntpath, MNAMELEN, "%s/%s.XXXX",
 			    mntdir, devbasename(devp->dev));
 			if (mkdtemp(mntpath) == NULL)
-				err(EXIT_FAILURE, "mkdtemp(%s)", mntpath);
+				die("mkdtemp(%s)", mntpath);
 		} else {
 			/* Recreate directory */
 			if (mkdir(mntpath, MNTPTMODE) == -1)
-				err(EXIT_FAILURE, "mkdir(%s)", mntpath);
+				die("mkdir(%s)", mntpath);
 		}
 	}
 	return (mntpath);
@@ -1856,7 +1858,7 @@ getmntpt(sdev_t *devp)
 
 	errno = 0;
 	if ((n = getmntinfo(&mb, MNT_WAIT)) == -1)
-		err(EXIT_FAILURE, "getmntinfo()");
+		die("getmntinfo()");
 	p = devbasename(devp->dev);
 	for (i = 0; i < n; i++) {
 		q = devbasename(mb[i].f_mntfromname);
@@ -1867,7 +1869,7 @@ getmntpt(sdev_t *devp)
 				return (devp->mntpt);
 			free(devp->mntpt);
 			if ((devp->mntpt = strdup(mb[i].f_mntonname)) == NULL)
-				err(EXIT_FAILURE, "strdup()");
+				die("strdup()");
 			return (devp->mntpt);
 		}
 		/* Check if the device was mounted using its glabel. */
@@ -1877,7 +1879,7 @@ getmntpt(sdev_t *devp)
 				return (devp->mntpt);
 			free(devp->mntpt);
 			if ((devp->mntpt = strdup(mb[i].f_mntonname)) == NULL)
-				err(EXIT_FAILURE, "strdup()");
+				die("strdup()");
 			return (devp->mntpt);
 		}
 	}
@@ -1923,7 +1925,7 @@ is_mntpt(const char *path)
 
 	errno = 0;
 	if ((n = getmntinfo(&mb, MNT_WAIT)) == -1)
-		err(EXIT_FAILURE, "getmntinfo()");
+		die("getmntinfo()");
 	for (i = 0; i < n && path != NULL; i++) {
 		if (strcmp(path, mb[i].f_mntonname) == 0)
 			return (true);
@@ -1959,7 +1961,7 @@ get_diskname(const char *path)
 	if (len < strlen(path)) {
 		len = strlen(path) + 10;
 		if ((name = realloc(name, len)) == NULL)
-			err(EXIT_FAILURE, "realloc()");
+			die("realloc()");
 	}
 	for (p = name; !isdigit(*path) && *path != '\0'; *p++ = *path++)
 		;
@@ -2266,20 +2268,20 @@ add_ptp_device(const char *ugen)
 	if (devstat(ugen, &sb) == -1)
 		return (NULL);
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
-		err(EXIT_FAILURE, "malloc()");
+		die("malloc()");
 	if ((devp->dev = strdup(devpath(dev))) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+		die("strdup()");
 	for (i = 0; i < nfstypes && fstype[i].id != PTPFS; i++)
 		;
 	devp->fs = &fstype[i];
 	if ((devp->name = get_label(dev, devp->fs->name)) != NULL) {
 		devp->name = strdup(devp->name);
 		if (devp->name == NULL)
-			err(EXIT_FAILURE, "strdup()");
+			die("strdup()");
 	} else {
 		devp->name = malloc(sizeof("Camera ()") + strlen(dev) + 1);
 		if (devp->name == NULL)
-			err(EXIT_FAILURE, "malloc()");
+			die("malloc()");
 		(void)sprintf(devp->name, "Camera (%s)", dev);
 	}
 	devp->owner	  = sb.st_uid;
@@ -2298,7 +2300,7 @@ add_ptp_device(const char *ugen)
 	devp->cmd_mounted = false;
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
-		err(EXIT_FAILURE, "realloc()");
+		die("realloc()");
 	devs[ndevs++] = devp;
 	notifybc(devp, true);
 
@@ -2325,9 +2327,9 @@ add_mtp_device(const char *ugen)
 	if (devstat(ugen, &sb) == -1)
 		return (NULL);
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
-		err(EXIT_FAILURE, "malloc()");
+		die("malloc()");
 	if ((devp->dev = strdup(devpath(dev))) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+		die("strdup()");
 
 	for (i = 0; i < nfstypes && fstype[i].id != MTPFS; i++)
 		;
@@ -2335,11 +2337,11 @@ add_mtp_device(const char *ugen)
 	if ((devp->name = get_label(dev, devp->fs->name)) != NULL) {
 		devp->name = strdup(devp->name);
 		if (devp->name == NULL)
-			err(EXIT_FAILURE, "strdup()");
+			die("strdup()");
 	} else {
 		devp->name = malloc(sizeof("Camera ()") + strlen(dev) + 1);
 		if (devp->name == NULL)
-			err(EXIT_FAILURE, "malloc()");
+			die("malloc()");
 		(void)sprintf(devp->name, "MTP device (%s)", dev);
 	}
 	devp->owner	  = sb.st_uid;
@@ -2358,7 +2360,7 @@ add_mtp_device(const char *ugen)
 	devp->cmd_mounted = false;
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
-		err(EXIT_FAILURE, "realloc()");
+		die("realloc()");
 	devs[ndevs++] = devp;
 	notifybc(devp, true);
 
@@ -2374,10 +2376,10 @@ add_fuse_device(const char *mntpt)
 	static int id = 0;
 
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
-		err(EXIT_FAILURE, "malloc()");
+		die("malloc()");
 	/* Generate a fictive device name */
 	if ((devp->dev = strdup("/dev/pseudo##")) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+		die("strdup()");
 	(void)sprintf(devp->dev, "/dev/pseudo%02d", id++);
 	/* Use the last part of mount point path for the name */
 	for (p = strchr(mntpt, '\0'); *p != '/' && p != mntpt; p--)
@@ -2385,7 +2387,7 @@ add_fuse_device(const char *mntpt)
 	if (*p == '/')
 		p++;
 	if ((devp->name = strdup(p)) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+		die("strdup()");
 	for (i = 0; i < nfstypes && fstype[i].id != FUSEFS; i++)
 		;
 	devp->st	  = st_from_type(ST_FUSE);
@@ -2401,10 +2403,10 @@ add_fuse_device(const char *mntpt)
 	devp->ejectable	  = false;
 	devp->cmd_mounted = false;
 	if ((devp->mntpt = strdup(mntpt)) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+		die("strdup()");
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
-		err(EXIT_FAILURE, "realloc()");
+		die("realloc()");
 	devs[ndevs++] = devp;
 	notifybc(devp, true);
 
@@ -2460,7 +2462,7 @@ add_device(const char *devname)
 		if (realdev == NULL)
 			return (NULL);
 		if ((dev.realdev = strdup(realdev)) == NULL)
-			err(EXIT_FAILURE, "strdup()");
+			die("strdup()");
 		if (devstat(realdev, &sb) == -1)
 			return (NULL);
 	} else if (devstat(devname, &sb) == -1)
@@ -2487,14 +2489,14 @@ add_device(const char *devname)
 	else
 		dev.ejectable = false;
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
-		err(EXIT_FAILURE, "malloc()");
+		die("malloc()");
 	if ((devp->dev = strdup(path)) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+		die("strdup()");
 	if (dev.fs != NULL && (p = get_label(devname, dev.fs->name)) != NULL) {
 		if ((devp->name = strdup(p)) == NULL)
-			err(EXIT_FAILURE, "strdup()");
+			die("strdup()");
 	} else if ((devp->name = strdup(devname)) == NULL)
-		err(EXIT_FAILURE, "strdup()");
+		die("strdup()");
 
 	/*
 	 * Get all glabels for this device. Drives with UFS can have more than
@@ -2503,7 +2505,7 @@ add_device(const char *devname)
 	for (i = j = 0; i < NGLBLPRFX; i++) {
 		if ((p = get_geom_label(devname, glblprfx[i])) != NULL) {
 			if ((devp->glabel[j++] = strdup(p)) == NULL)
-				err(EXIT_FAILURE, "strdup()");
+				die("strdup()");
 		}
 	}
 	/* Terminate glabel list. */
@@ -2572,7 +2574,7 @@ add_device(const char *devname)
 	}
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
-		err(EXIT_FAILURE, "realloc()");
+		die("realloc()");
 	devs[ndevs++] = devp;
 	if (devp->st == NULL)
 		devp->visible = false;
@@ -2653,7 +2655,7 @@ get_ugen_type(const char *ugen)
 		    libusb20_dev_get_address(pdev) != addr)
 			continue;
 		if (libusb20_dev_open(pdev, 0))
-			err(EXIT_FAILURE, "libusb20_dev_open()");
+			die("libusb20_dev_open()");
 		ddesc = libusb20_dev_get_device_desc(pdev);
 		for (i = 0; i !=  ddesc->bNumConfigurations && !found; i++) {
 			cfg = libusb20_dev_alloc_config(pdev, i);
@@ -2692,7 +2694,7 @@ get_ugen_type(const char *ugen)
 			free(cfg);
 		}
 		if (libusb20_dev_close(pdev))
-                        err(EXIT_FAILURE, "libusb20_dev_close()");
+                        die("libusb20_dev_close()");
 	}
 	libusb20_be_free(pbe);
 
@@ -3344,13 +3346,13 @@ poll_mntbl()
 			(void)usleep(500000);
 		bufsz = (n + 8) * sizeof(struct statfs);
 		if ((buf = malloc(bufsz)) == NULL)
-			err(EXIT_FAILURE, "malloc()");
+			die("malloc()");
 	}
 	if ((n = getfsstat(buf, bufsz, MNT_WAIT)) != -1) {
 		while (n > 0 && n * sizeof(struct statfs) >= bufsz) {
 			bufsz += 8 * sizeof(struct statfs);
 			if ((buf = realloc(buf, bufsz)) == NULL)
-				err(EXIT_FAILURE, "realloc()");
+				die("realloc()");
 			if ((n = getfsstat(buf, bufsz, MNT_WAIT)) == -1)
 				logprint("getfsstat()");
 		}
@@ -3465,7 +3467,7 @@ check_mntbl(struct statfs *sb, int nsb)
 				/* Mounted. */
 				devp->mntpt = strdup(mntpt);
 				if (devp->mntpt == NULL)
-					err(EXIT_FAILURE, "strdup()");
+					die("strdup()");
 				devp->mounted = true;
 				cliprintbc(NULL, "M:dev=%s:mntpt=%s",
 				    devp->dev, devp->mntpt);
@@ -3478,7 +3480,7 @@ check_mntbl(struct statfs *sb, int nsb)
 				free(devp->mntpt);
 				devp->mntpt = strdup(mntpt);
 				if (devp->mntpt == NULL)
-					err(EXIT_FAILURE, "strdup()");
+					die("strdup()");
 				cliprintbc(NULL, "M:dev=%s:mntpt=%s",
 				    devp->dev, devp->mntpt);
 			}
