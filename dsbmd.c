@@ -290,6 +290,18 @@ main(int argc, char *argv[])
 	cfg = dsbcfg_read(NULL, PATH_CONFIG, vardefs, CFG_NVARS);
 	if (cfg == NULL)
 		errx(EXIT_FAILURE, "%s", dsbcfg_strerror());
+	if (dsbcfg_getval(cfg, CFG_CFG_VERSION).integer < CFGVERSION) {
+		warnx("***********************************************"	\
+		      "******************");
+		warnx("WARNING");
+		warnx("");
+		warnx("Your dsbmd.conf semms to be outdated. Please " 	\
+		      "recreate it from");
+		warnx("dsbmd.conf.sample, or merge the files.");
+		warnx("");
+		warnx("***********************************************"	\
+		      "******************\n");
+	}
 	/*
 	 * Generate UID list of allowed users.
 	 */
