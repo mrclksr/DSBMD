@@ -245,6 +245,7 @@ struct pollmsg_s {
 static int	nclients    = 0;	/* # of connected clients. */
 static int	ndevs	    = 0;	/* # of devs. */
 static int	queuesz	    = 0;	/* # of devices in poll queue. */
+static bool	polling	    = false;	/* Do(n't) poll devices */
 static FILE	*lockfp	    = NULL;	/* Filepointer for lock file. */
 static uid_t    *allow_uids = NULL;	/* UIDs allowed to connect. */
 static gid_t    *allow_gids = NULL;	/* GIDs allowed to connect. */
@@ -260,7 +261,7 @@ main(int argc, char *argv[])
 	int	       i, error, sflags, maxfd, ch, dsock, lsock;
 	int	       csock, mntchkiv, pollsv[2];
 	DIR	       *dirp, *dirp2;
-	bool	       fflag, polling;
+	bool	       fflag;
 	FILE	       *fp;
 	char	       lvmpath[512], *ev, **v;
 	time_t	       mntchktime;
@@ -335,7 +336,18 @@ main(int argc, char *argv[])
 				logprint("kldload(%s)", *v);
 		}
 	}
-
+	/* Timeout for select() */
+	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer;
+	if (mntchkiv <= 0) {
+		logprintx("%s <= 0. Assuming %s = 1",
+		    dsbcfg_varname(cfg, CFG_MNTCHK_INTERVAL),
+		    dsbcfg_varname(cfg, CFG_MNTCHK_INTERVAL));
+		mntchkiv = 1;
+	}
+	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer > 0)
+		polling = true;
+	else
+		polling = false;
 	for (i = 0; i < nfstypes; i++) {
 		switch (fstype[i].id) {
 		case UFS:
@@ -473,34 +485,24 @@ main(int argc, char *argv[])
 	sflags |= O_NONBLOCK;
 	if (fcntl(lsock, F_SETFL, sflags) == -1)
 		die("fcntl()");
-
-	/* Timeout for select() */
-	mntchkiv = dsbcfg_getval(cfg, CFG_MNTCHK_INTERVAL).integer;
-	if (mntchkiv <= 0) {
-		logprintx("%s <= 0. Assuming %s = 1",
-		    dsbcfg_varname(cfg, CFG_MNTCHK_INTERVAL),
-		    dsbcfg_varname(cfg, CFG_MNTCHK_INTERVAL));
-		mntchkiv = 1;
-	}
 	FD_ZERO(&allset);
 	FD_SET(lsock, &allset); FD_SET(dsock, &allset);
 
 	maxfd = dsock > lsock ? dsock : lsock;
 
-	(void)pthread_mutex_init(&pollqmtx, NULL);
-
-	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer > 0) {
+	if (polling) {
 		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, pollsv) == -1)
 			die("socketpair()");
 		polling = true;
 		maxfd = maxfd > pollsv[0] ? maxfd : pollsv[0];
 		FD_SET(pollsv[0], &allset);
 
+		(void)pthread_mutex_init(&pollqmtx, NULL);
 		if (pthread_create(&tid, NULL, poll_thr, &pollsv[1]) != 0)
 			die("pthread_create()");
 		(void)pthread_detach(tid);
-	} else
-		polling = false;
+	}
+
 	/* Main loop. */
 	for (mntchktime = 0;;) {
 		rset = allset;
@@ -2557,7 +2559,7 @@ add_device(const char *devname)
 		if (fnmatch(*v, devp->model, FNM_CASEFOLD) == 0)
 			devp->polling = false;
 	}
-	if (devp->polling)
+	if (polling && devp->polling)
 		add_to_pollqueue(devp);
 	if (devp->has_media && devp->fs != NULL)
 		devp->visible = true;
@@ -2595,8 +2597,8 @@ del_device(sdev_t *devp)
 		;
 	if (i == ndevs)
 		return;
-	del_from_pollqueue(devs[i]);
-
+	if (polling)
+		del_from_pollqueue(devs[i]);
 	if (devs[i]->has_media && devs[i]->visible)
 		notifybc(devs[i], false);
 	/*
