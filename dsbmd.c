@@ -295,7 +295,7 @@ main(int argc, char *argv[])
 		      "******************");
 		warnx("WARNING");
 		warnx("");
-		warnx("Your dsbmd.conf semms to be outdated. Please " 	\
+		warnx("Your dsbmd.conf seems to be outdated. Please " 	\
 		      "recreate it from");
 		warnx("dsbmd.conf.sample, or merge the files.");
 		warnx("");
