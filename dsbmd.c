@@ -37,6 +37,7 @@
 #include <sys/user.h>
 #include <sys/proc.h>
 #include <sys/param.h>
+#include <sys/queue.h>
 #include <sys/ucred.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -84,6 +85,7 @@
 #define MNTPTMODE	   (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
+#define MAXCMDARGS	   12
 
 #define USB_CLASS_UMASS	   0x08
 #define USB_SUBCLASS_UMASS 0x06
@@ -100,6 +102,17 @@
 	fstype[i].mntcmd   = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD).string;   \
 	fstype[i].mntcmd_u = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD_U).string; \
 	fstype[i].uopts	   = dsbcfg_getval(cfg, CFG_##ID##_OPTS).string;     \
+} while (0)
+
+#define try_exec(dev, cli, cmd, func, ...) do {			  	     \
+	switch (wait_for_mutex(&dev->mtx)) {				     \
+	case  0: cliprint(cli, "E:command=%s:code=%d", cmd, ERR_TIMEOUT);    \
+		 return;						     \
+	case -1: die("wait_for_mutex()");				     \
+	default: break;							     \
+	}								     \
+	(void)func(__VA_ARGS__);					     \
+	(void)pthread_mutex_unlock(&dev->mtx);				     \
 } while (0)
 
 static int	change_owner(sdev_t *, uid_t);
@@ -140,6 +153,7 @@ static char	*get_diskname(const char *);
 static char	*get_lvm_dev(const char *);
 static char	*dev_from_gptid(const char *);
 static char	*ugen_to_gphoto_port(const char *);
+static void	*client_thr(void *);
 static void	*poll_thr(void *);
 static void	lockpidfile(void);
 static void	process_devd_event(char *);
@@ -158,12 +172,12 @@ static void	free_iovec(struct iovec *);
 static void	add_to_pollqueue(sdev_t *);
 static void	del_from_pollqueue(sdev_t *);
 static void	exec_cmd(client_t *, char *);
-static void	cmd_eject(client_t *, char **);
-static void	cmd_speed(client_t *, char **);
-static void	cmd_size(client_t *, char **);
-static void	cmd_mount(client_t *, char **);
-static void	cmd_unmount(client_t *, char **);
-static void	cmd_quit(client_t *cli, char **);
+static void	cmd_eject(client_t *, sdev_t *, char **);
+static void	cmd_speed(client_t *, sdev_t *, char **);
+static void	cmd_size(client_t *, sdev_t *, char **);
+static void	cmd_mount(client_t *, sdev_t *, char **);
+static void	cmd_unmount(client_t *, sdev_t *, char **);
+static void	cmd_quit(client_t *cli, sdev_t *, char **);
 static void	notifybc(sdev_t *, bool);
 static void	notify(client_t *, sdev_t *, bool);
 static void	cliprint(client_t *, const char *, ...);
@@ -224,22 +238,14 @@ const iface_t interfaces[] = {
  */
 struct command_s {
 	const char *cmd;
-	void (*cmdf)(client_t *, char **);
+	void (*cmdf)(client_t *, sdev_t *, char **);
 } commands[] = {
-	{ "quit",	&cmd_quit    },
-	{ "mount",	&cmd_mount   },
-	{ "unmount",	&cmd_unmount },
-	{ "eject",	&cmd_eject   },
-	{ "speed",	&cmd_speed   },
-	{ "size",	&cmd_size    }
-};
-
-/* 
- * Struct to represent a message sent from the poll thread
- * to the main thread.
- */
-struct pollmsg_s {
-	sdev_t *devp;
+	{ "quit",    &cmd_quit    },
+	{ "mount",   &cmd_mount   },
+	{ "unmount", &cmd_unmount },
+	{ "eject",   &cmd_eject   },
+	{ "speed",   &cmd_speed   },
+	{ "size",    &cmd_size    }
 };
 
 static int	nclients    = 0;	/* # of connected clients. */
@@ -253,13 +259,17 @@ static sdev_t	**pollqueue = NULL;	/* List of devices to poll. */
 static sdev_t	**devs      = NULL;	/* List of mountable devs. */
 static client_t **clients   = NULL;	/* List of connected clients. */
 static dsbcfg_t *cfg	    = NULL;
-static pthread_mutex_t pollqmtx;
+static pthread_mutex_t pollqmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mntblmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t devlsmtx = PTHREAD_MUTEX_INITIALIZER;
+
+SLIST_HEAD(, sdev_s) devls;
+SLIST_HEAD(, client_s) clils;
 
 int
 main(int argc, char *argv[])
 {
-	int	       i, error, sflags, maxfd, ch, dsock, lsock;
-	int	       csock, mntchkiv, pollsv[2];
+	int	       i, error, sflags, maxfd, ch, dsock, lsock, mntchkiv;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag;
 	FILE	       *fp;
@@ -273,7 +283,6 @@ main(int argc, char *argv[])
 	struct passwd  *pw;
 	struct dirent  *dp, *dp2;
 	struct timeval tv;
-	struct pollmsg_s pmsg;
 	struct sockaddr_un s_addr;
 
 	fflag = false;
@@ -503,14 +512,7 @@ main(int argc, char *argv[])
 	maxfd = dsock > lsock ? dsock : lsock;
 
 	if (polling) {
-		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, pollsv) == -1)
-			die("socketpair()");
-		polling = true;
-		maxfd = maxfd > pollsv[0] ? maxfd : pollsv[0];
-		FD_SET(pollsv[0], &allset);
-
-		(void)pthread_mutex_init(&pollqmtx, NULL);
-		if (pthread_create(&tid, NULL, poll_thr, &pollsv[1]) != 0)
+		if (pthread_create(&tid, NULL, poll_thr, NULL) != 0)
 			die("pthread_create()");
 		(void)pthread_detach(tid);
 	}
@@ -519,7 +521,7 @@ main(int argc, char *argv[])
 	for (mntchktime = 0;;) {
 		rset = allset;
 		tv.tv_sec = mntchkiv; tv.tv_usec = 0;
-		if (time(NULL) - mntchktime >= mntchkiv) 
+		if (time(NULL) - mntchktime >= mntchkiv)
 			mntchktime = poll_mntbl();
 		switch (select(maxfd + 1, &rset, NULL, NULL, &tv)) {
 		case -1:
@@ -528,7 +530,9 @@ main(int argc, char *argv[])
 			die("select()");
 			/* NOTREACHED */
 		case 0:
+		(void)pthread_mutex_lock(&mntblmtx);
 			mntchktime = poll_mntbl();
+		(void)pthread_mutex_unlock(&mntblmtx);
 			continue;
 		}
 		if (FD_ISSET(dsock, &rset)) {
@@ -553,31 +557,7 @@ main(int argc, char *argv[])
 		} 
 		if (FD_ISSET(lsock, &rset)) {
 			/* A client has connected. */
-			if ((cli = process_connreq(lsock)) != NULL) {
-				maxfd = maxfd > cli->s ? maxfd : cli->s;
-				FD_SET(cli->s, &allset);
-			}
-		}
-		if (polling && FD_ISSET(pollsv[0], &rset)) {
-			/* Polled device changed. */
-			if (recv(pollsv[0], &pmsg, sizeof(pmsg),
-			    MSG_WAITALL) == -1) {
-				if (errno == EINTR)
-					continue;
-				die("recv()");
-			}
-			update_device(pmsg.devp);
-		}
-		for (i = 0; i < nclients; i++) {
-			if (!FD_ISSET(clients[i]->s, &rset))
-				continue;
-			csock = clients[i]->s;
-			if (serve_client(clients[i]) == -1 ||
-			    clients[i]->s == -1) {
-				/* Disconnected */
-				FD_CLR(csock, &allset);
-				del_client(clients[i--]);
-			}
+			process_connreq(lsock);
 		}
 	}
 	/* NOTREACHED */
@@ -627,15 +607,77 @@ lockpidfile()
 }
 
 static sdev_t *
+access_dev(sdev_t *devp)
+{
+	if (pthread_mutex_lock(&devlsmtx) == 0) {
+		if (pthread_mutex_lock(&devp->mtx) == 0) {
+			(void)pthread_mutex_unlock(&devlsmtx);
+			return (devp);
+		}
+		(void)pthread_mutex_unlock(&devlsmtx);
+	}
+	return (NULL);
+}
+
+static int
+wait_for_mutex(pthread_mutex_t *mtx, int secs)
+{
+	struct timespec ts;
+
+	ts.tv_sec  = secs;
+	ts.tv_nsec = 0;
+
+	if (pthread_mutex_timedlock(mtx, &ts) == -1) {
+		if (errno == ETIMEDOUT)
+			return (0);
+		return (-1);
+	}
+	return (1);
+}
+
+static sdev_t *
 lookup_dev(const char *dev)
 {
 	int i;
 
 	dev = devbasename(dev);
+
+	(void)pthread_mutex_lock(&devlsmtx);
 	for (i = 0; i < ndevs; i++) {
-		if (strcmp(dev, devbasename(devs[i]->dev)) == 0)
+		if (strcmp(dev, devbasename(devs[i]->dev)) == 0) {
+			(void)pthread_mutex_lock(&devs[i]->mtx);
+			(void)pthread_mutex_unlock(&devlsmtx);
+
 			return (devs[i]);
+		}
 	}
+	(void)pthread_mutex_unlock(&devlsmtx);
+
+	return (NULL);
+}
+
+static sdev_t *
+lookup_dev_timed(const char *dev, int *error, int secs)
+{
+	int i;
+
+	dev = devbasename(dev);
+
+	(void)pthread_mutex_lock(&devlsmtx);
+	for (i = *error = 0; i < ndevs; i++) {
+		if (strcmp(dev, devbasename(devs[i]->dev)) == 0) {
+			if (wait_for_mutex(&devs[i]->mtx, secs) > 0) {
+				(void)pthread_mutex_unlock(&devlsmtx);
+				return (devs[i]);
+			} else
+				*error = errno;
+			(void)pthread_mutex_unlock(&devlsmtx);
+
+			return (NULL);
+		}
+	}
+	(void)pthread_mutex_unlock(&devlsmtx);
+
 	return (NULL);
 }
 
@@ -695,18 +737,29 @@ add_client(int socket)
 	cp->uid	 = uid;
 	cp->slen = cp->rd = 0;
 	cp->overflow = false;
+	cp->nblocked = 0;
 
 	/* 
 	 * Send the client the current list of mountable devs.
 	 */
+	(void)pthread_mutex_lock(&devlsmtx);
 	for (n = 0; n < ndevs; n++) {
+		if (pthread_mutex_trylock(&devs[n]->mtx) != 0) {
+			cp->blocked[cp->nblocked++] = devs[n];
+			continue;
+		}
 		if (devs[n]->visible)
 			notify(cp, devs[n], true);
+		(void)pthread_mutex_unlock(&devs[n]->mtx);
 	}
 	/* Terminate device list output. */
 	cliprint(cp, "=");
 	nclients++;
 	logprintx("Client with UID %d connected", uid);
+
+	(void)pthread_create(&cp->tid, NULL, client_thr, cp);
+	(void)pthread_detach(cp->tid);
+	(void)pthread_mutex_unlock(&devlsmtx);
 
 	return (cp);
 error:
@@ -739,6 +792,56 @@ del_client(client_t *cli)
 		clients[i] = clients[i + 1];
 	nclients--;
 }
+
+static void *
+client_thr(void *data)
+{
+	int	  n, i, error, bi;
+	fd_set	  rset;
+	client_t *cli = (client_t *)data;
+	struct timeval tv, *tp;
+
+	FD_ZERO(&rset);
+	for (bi = 0;;) {
+		FD_SET(cli->s, &rset);
+		if (cli->nblocked > bi) {
+			tv.tv_sec  = 1;
+			tv.tv_usec = 0;
+			tp = &tv;
+		} else
+			tp = NULL;
+		if (select(cli->s + 1, &rset, NULL, NULL, tp) == -1) {
+			if (errno == EINTR)
+				continue;
+			die("select()");
+		} else if (n == 0) {
+			/*
+			 * Show client the remaining devices that where
+			 * blocked during the connection phase.
+			 */
+			(void)pthread_mutex_lock(&devlsmtx);
+			for (i = 0; i < ndevs; i++) {
+				if (devs[i] == cli->blocked[bi])
+					break;
+			}
+			if (i < ndevs) {
+				if (pthread_mutex_trylock(&devs[i]->mtx) == 0) {
+					bi++;
+					notify(cli, devs[i], true);
+				}
+			}
+			(void)pthread_mutex_unlock(&devlsmtx);
+		}
+		if ((n = client_readln(cli, &error)) == -1) {
+			if (error == SOCK_ERR_CONN_CLOSED) {
+				del_client(cli);
+				return (NULL);
+			}
+			logprint("client_readln()");
+		} else if (n > 0)
+			exec_cmd(cli, cli->buf);
+	}
+}	
 
 /*
  * Return a value > 0 if a newline terminated string is available.
@@ -897,6 +1000,8 @@ process_devd_event(char *ev)
 		 */
 		if (devp->iface->type != IF_TYPE_CD)
 			del_device(devp);
+		else
+			(void)pthread_mutex_unlock(&devp->mtx);
 	}
 }
 
@@ -923,23 +1028,21 @@ parse_devd_event(char *str)
 	}
 }
 
-
 static void *
 poll_thr(void *socket)
 {
 	int	s, polliv;
 	sdev_t *devp;
-	struct pollmsg_s msg;
 
  	s = *(int *)socket;
 	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 	for (;; sleep(polliv)) {
-		(void)pthread_mutex_lock(&pollqmtx);
 		while ((devp = media_changed()) != NULL) {
-			msg.devp = devp;
-			(void)send(s, &msg, sizeof(msg), MSG_EOR);
+			if (pthread_mutex_trylock(&devp->mtx) != 0)
+				continue;
+			update_device(devp);
+			(void)pthread_mutex_unlock(&devp->mtx);
 		}
-		(void)pthread_mutex_unlock(&pollqmtx);
 	}
 	return (NULL);
 }
@@ -2317,6 +2420,7 @@ add_ptp_device(const char *ugen)
 		die("realloc()");
 	devs[ndevs++] = devp;
 	notifybc(devp, true);
+	(void)pthread_mutex_init(&devp->mtx, NULL);
 
 	return (devp);
 }
@@ -2372,6 +2476,7 @@ add_mtp_device(const char *ugen)
 	devp->visible	  = true;
 	devp->mntpt	  = NULL;
 	devp->cmd_mounted = false;
+	(void)pthread_mutex_init(&devp->mtx, NULL);
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
 		die("realloc()");
@@ -2418,6 +2523,7 @@ add_fuse_device(const char *mntpt)
 	devp->cmd_mounted = false;
 	if ((devp->mntpt = strdup(mntpt)) == NULL)
 		die("strdup()");
+	(void)pthread_mutex_init(&devp->mtx, NULL);
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
 		die("realloc()");
@@ -2586,6 +2692,7 @@ add_device(const char *devname)
 			break;
 		}
 	}
+	(void)pthread_mutex_init(&devp->mtx, NULL);
 	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
 	if (devs == NULL)
 		die("realloc()");
@@ -2594,6 +2701,7 @@ add_device(const char *devname)
 		devp->visible = false;
 	if (devp->visible)
 		notifybc(devp, true);
+
 	return (devp);
 }
 
@@ -2626,9 +2734,11 @@ del_device(sdev_t *devp)
 	free(devs[i]->name);
 	free(devs[i]->model);
 	free(devs[i]->realdev);
+	
 
 	for (j = 0; j < NGLBLPRFX && devs[i]->glabel[j] != NULL; j++)
 		free(devs[i]->glabel[j]);
+	(void)pthread_mutex_destroy(&devs[i]->mtx);
 	free(devs[i]);
 
 	for (; i < ndevs - 1; i++)
@@ -3151,27 +3261,29 @@ serve_client(client_t *cli)
 	 * sizeof(buf), or if it contains unprintable bytes, read
 	 * until end of line, and send the client an error message.
 	 */
-	if ((n = client_readln(cli, &error)) > 0) {
+	if ((n = client_readln(cli, &error)) == 0) {
+		return (0);
+	} else if (n > 0) {
 		exec_cmd(cli, cli->buf);
 		return (0);
 	}
-	if (n == 0)
-		return (0);
 	if (error == SOCK_ERR_IO_ERROR)
 		logprint("client_readln() error. Closing client connection");
 	/* Client disconnected or error. */
 	clisock_close(cli);
-
+	
 	return (-1);
 }
 
 static void
 exec_cmd(client_t *cli, char *cmdstr)
 {
-	int  argc, i;
-	char *p, *last, *argv[12];
+	int    argc, i, error;
+	char   *p, *last, *argv[MAXCMDARGS];
+	sdev_t *devp;
 	struct command_s *cp;
-
+	struct timespec ts;
+				
 	if (strlen(cmdstr) == 0) {
 		/* Ignore empty strings */
 		return;
@@ -3189,16 +3301,51 @@ exec_cmd(client_t *cli, char *cmdstr)
 	if (cp == NULL) {
 		cliprint(cli, "E:command=%s:code=%d", argv[0],
 		    ERR_UNKNOWN_COMMAND);
-	} else
-		cp->cmdf(cli, argv + 1);
+		return;
+	}
+	if (strcmp(argv[0], "quit") == 0) {
+		cp->cmdf(cli, NULL, NULL);
+		return;
+	}
+	if (argc < 2) {
+		cliprint(cli, "E:command=%s:code=%d", argv[0],
+		    ERR_SYNTAX_ERROR);
+		return;
+	}
+	if ((devp = lookup_dev_timed(argv[argc - 1], &error, 5)) == NULL) {
+		if (error == ETIMEDOUT) {
+			cliprint(cli, "E:command=%s:code=%d", argv[0],
+			    ERR_TIMEOUT);
+		} else {
+			cliprint(cli, "E:command=%s:code=%d", argv[0],
+			    ERR_NO_SUCH_DEVICE);
+		}
+		return;
+	} else if (!devp->visible) {
+		cliprint(cli, "E:command=eject:code=%d", ERR_NO_SUCH_DEVICE);
+		return;
+	}
+	argv[argc - 1] = NULL;
+	ts.tv_sec  = dsbcfg_getval(cfg, CFG_PROCMAXWAIT).integer;
+	ts.tv_nsec = 0;
+
+	if (pthread_mutex_timedlock(&devp->mtx, &ts) == -1) {
+		if (errno == ETIMEDOUT) {
+			cliprint(cli, "E:command=%s:code=%d", argv[0],
+			    ERR_TIMEOUT);
+			return;
+		}
+		die("pthread_mutex_timedwait()");
+	}
+	cp->cmdf(cli, devp, argv + 1);
+	(void)pthread_mutex_unlock(&devp->mtx);
 }
 
 static void
-cmd_eject(client_t *cli, char **argv)
+cmd_eject(client_t *cli, sdev_t *devp, char **argv)
 {
-	int	i;
-	bool	force;
-	sdev_t *devp;
+	int  i;
+	bool force;
 
 	force = false;
 	for (i = 0; argv[i] != NULL && argv[i][0] == '-'; i++) {
@@ -3210,32 +3357,17 @@ cmd_eject(client_t *cli, char **argv)
 			return;
 		}
 	}
-	if (argv[i] == NULL) {
-		cliprint(cli, "E:command=eject:code=%d", ERR_SYNTAX_ERROR);
-		return;
-	}
-	if ((devp = lookup_dev(argv[i])) == NULL || !devp->visible) {
-		cliprint(cli, "E:command=eject:code=%d", ERR_NO_SUCH_DEVICE);
-		return;
-	}
+	(void)pthread_mutex_lock(&mntblmtx);
 	(void)eject_media(cli, devp, force);
+	(void)pthread_mutex_unlock(&mntblmtx);
 }
 
 static void
-cmd_size(client_t *cli, char **argv)
+cmd_size(client_t *cli, sdev_t *devp, char **unused_argv)
 {
-	int	      n, fd;
-	sdev_t	      *devp;
+	int n, fd;
 	struct statfs s;
 
-	if (argv[0] == NULL) {
-		cliprint(cli, "E:command=size:code=%d", ERR_SYNTAX_ERROR);
-		return;
-	}
-	if ((devp = lookup_dev(argv[0])) == NULL || !devp->visible) {
-		cliprint(cli, "E:command=size:code=%d", ERR_NO_SUCH_DEVICE);
-		return;
-	}
 	if (devp->mntpt != NULL) {
 		/*
 		 * If a device was just mounted, it can happen that the
@@ -3279,45 +3411,31 @@ cmd_size(client_t *cli, char **argv)
 }
 
 static void
-cmd_speed(client_t *cli, char **argv)
+cmd_speed(client_t *cli, sdev_t *devp, char **argv)
 {
-	int	speed;
-	sdev_t *devp;
+	int speed;
 
-	if (argv[0] == NULL || argv[1] == NULL) {
+	if (argv[0] == NULL) {
 		cliprint(cli, "E:command=speed:code=%d", ERR_SYNTAX_ERROR);
 		return;
 	}
-	if ((devp = lookup_dev(argv[0])) == NULL || !devp->visible) {
-		cliprint(cli, "E:command=speed:code=%d", ERR_NO_SUCH_DEVICE);
-		return;
-	}
-	speed = strtol(argv[1], NULL, 10);
+	speed = strtol(argv[0], NULL, 10);
 	(void)set_cdrspeed(cli, devp, speed);
 }
 
 static void
-cmd_mount(client_t *cli, char **argv)
+cmd_mount(client_t *cli, sdev_t *devp, char **argv)
 {
-	sdev_t *devp;
-
-	if (argv[0] == NULL) {
-		cliprint(cli, "E:command=mount:code=%d", ERR_SYNTAX_ERROR);
-		return;
-	}
-	if ((devp = lookup_dev(argv[0])) == NULL || !devp->visible) {
-		cliprint(cli, "E:command=mount:code=%d", ERR_NO_SUCH_DEVICE);
-		return;
-	}
+	(void)pthread_mutex_lock(&mntblmtx);
 	(void)mount_device(cli, devp);
+	(void)pthread_mutex_unlock(&mntblmtx);
 }
 
 static void
-cmd_unmount(client_t *cli, char **argv)
+cmd_unmount(client_t *cli, sdev_t *devp, char **argv)
 {
-	int	i;
-	bool	force;
-	sdev_t *devp;
+	int  i;
+	bool force;
 
 	force = false;
 	for (i = 0; argv[i] != NULL && argv[i][0] == '-'; i++) {
@@ -3329,20 +3447,14 @@ cmd_unmount(client_t *cli, char **argv)
 			return;
 		}
 	}
-	if (argv[i] == NULL) {
-		cliprint(cli, "E:command=unmount:code=%d", ERR_SYNTAX_ERROR);
-		return;
-	}
-	if ((devp = lookup_dev(argv[i])) == NULL || !devp->visible) {
-		cliprint(cli, "E:command=unmount:code=%d", ERR_NO_SUCH_DEVICE);
-		return;
-	}
+	(void)pthread_mutex_lock(&mntblmtx);
 	(void)unmount_device(cli, devp, force, false);
+	(void)pthread_mutex_unlock(&mntblmtx);
 }
 
 
 static void
-cmd_quit(client_t *cli, char **argv)
+cmd_quit(client_t *cli, sdev_t *unused, char **unused_argv)
 {
 	clisock_close(cli);
 }
@@ -3397,8 +3509,11 @@ check_fuse_mount(struct statfs *sb, int nsb)
 				devp = devs[j];
 				if (devp->mntpt == NULL)
 					continue;
+				if (pthread_mutex_trylock(&devp->mtx) != 0)
+					continue;
 				if (strcmp(devp->mntpt, sb[i].f_mntonname) == 0)
 					found = true;
+				(void)pthread_mutex_unlock(&devp->mtx);
 			}
 			if (!found) {
 				/* New FUSE device mounted. */
@@ -3420,12 +3535,16 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 			continue;
 		if (devs[i]->iface->type != IF_TYPE_FUSE)
 			continue;
+		if (pthread_mutex_trylock(&devs[i]->mtx) != 0)
+			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			if (strcmp(devs[i]->mntpt, sb[j].f_mntonname) == 0)
 				found = true;
 		}
 		if (!found)
 			del_device(devs[i]);
+		else
+			(void)pthread_mutex_unlock(&devs[i]->mtx);
 	}
 }
 
@@ -3445,7 +3564,6 @@ match_glabel(sdev_t *devp, const char *dev)
 		if (strcmp(devp->glabel[i], dev) == 0 || strcmp(p, dev) == 0)
 			return (true);
 	}
-
 	return (false);
 }
 
@@ -3463,6 +3581,8 @@ check_mntbl(struct statfs *sb, int nsb)
 		if (devs[i]->iface->type == IF_TYPE_FUSE)
 			continue;
 		devp = devs[i];
+		if (pthread_mutex_trylock(&devp->mtx) != 0)
+			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			q = devbasename(sb[j].f_mntfromname);
 			if (strcmp(devbasename(devp->dev), q) != 0) {
@@ -3500,8 +3620,10 @@ check_mntbl(struct statfs *sb, int nsb)
 			}
 		} else if (devp->mounted) {
 			if (devp->cmd_mounted) {
-				if (is_mntpt(devp->mntpt))
+				if (is_mntpt(devp->mntpt)) {
+					(void)pthread_mutex_unlock(&devp->mtx);
 					continue;
+				}
 			}	
 			/* Unmounted */
 			rmntpt(devp->mntpt);
@@ -3513,6 +3635,7 @@ check_mntbl(struct statfs *sb, int nsb)
 			devp->mntpt   = NULL;
 			devp->mounted = false;
 		}
+		(void)pthread_mutex_unlock(&devp->mtx);
 	}
 }
 

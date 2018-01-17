@@ -73,6 +73,7 @@
 #define ERR_INVALID_ARGUMENT	((1 << 8) + 0x0f)
 #define ERR_STRING_TOO_LONG	((1 << 8) + 0x10)
 #define ERR_BAD_STRING		((1 << 8) + 0x11)
+#define ERR_TIMEOUT		((1 << 8) + 0x12)
 
 typedef enum DEV_TYPES {
 	ST_HDD,		ST_MMC,
@@ -134,6 +135,7 @@ typedef struct sdev_s {
 	gid_t	      group;		  /* GID of device. */
 	const iface_t *iface;		  /* Interface type */
 	const storage_type_t *st;  	  /* Media/storage type */
+	pthread_mutex_t mtx;
 } sdev_t;
 
 /*
@@ -142,6 +144,7 @@ typedef struct sdev_s {
 typedef struct client_s {
 	int    s;			  /* Client socket. */
 	int    id;			  /* Unique ID */
+	int    nblocked;
 	bool   overflow;		  /* Read command string too long */
 	char   buf[64];			  /* String buffer for commands. */
 	char   msg[128];		  /* Message buffer. */
@@ -149,6 +152,8 @@ typedef struct client_s {
 	gid_t *gids;			  /* Client GIDs. */
 	size_t rd;			  /* # of bytes in buffer */
 	size_t slen;			  /* Len. of string in buffer. */
+	sdev_t *blocked[12];
+	pthread_t tid;
 } client_t;
 
 #endif	/* !_DSBMD_H_ */
