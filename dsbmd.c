@@ -135,7 +135,6 @@ static int	uconnect(const char *);
 static int	devd_connect(void);
 static int	send_string(int, const char *);
 static int	client_readln(client_t *, int *);
-static int	serve_client(client_t *);
 static bool	match_part_dev(const char *, size_t);
 static bool	match_glabel(sdev_t *, const char *);
 static bool	has_media(const char *);
@@ -248,23 +247,18 @@ struct command_s {
 	{ "size",    &cmd_size    }
 };
 
-static int	nclients    = 0;	/* # of connected clients. */
-static int	ndevs	    = 0;	/* # of devs. */
-static int	queuesz	    = 0;	/* # of devices in poll queue. */
-static bool	polling	    = false;	/* Do(n't) poll devices */
-static FILE	*lockfp	    = NULL;	/* Filepointer for lock file. */
-static uid_t    *allow_uids = NULL;	/* UIDs allowed to connect. */
-static gid_t    *allow_gids = NULL;	/* GIDs allowed to connect. */
-static sdev_t	**pollqueue = NULL;	/* List of devices to poll. */
-static sdev_t	**devs      = NULL;	/* List of mountable devs. */
-static client_t **clients   = NULL;	/* List of connected clients. */
-static dsbcfg_t *cfg	    = NULL;
-static pthread_mutex_t pollqmtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t mntblmtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t devlsmtx = PTHREAD_MUTEX_INITIALIZER;
-
-SLIST_HEAD(, sdev_s) devls;
-SLIST_HEAD(, client_s) clils;
+static bool		polling	   = false; /* Do(n't) poll devices */
+static FILE	       *lockfp	   = NULL;  /* Filepointer for lock file. */
+static uid_t	       *allow_uids = NULL;  /* UIDs allowed to connect. */
+static gid_t	       *allow_gids = NULL;  /* GIDs allowed to connect. */
+static dsbcfg_t	       *cfg	   = NULL;
+static pthread_mutex_t  pollqmtx   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  mntblmtx   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  devlsmtx   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  clilsmtx   = PTHREAD_MUTEX_INITIALIZER;
+static SLIST_HEAD(, devlist_s) devs;	    /* List of mountable devs. */
+static SLIST_HEAD(, clilist_s) clis;	    /* List of connected clients. */
+static SLIST_HEAD(, devlist_s) pollq;
 
 int
 main(int argc, char *argv[])
@@ -276,7 +270,6 @@ main(int argc, char *argv[])
 	char	       lvmpath[512], *ev, **v;
 	time_t	       mntchktime;
 	fd_set	       allset, rset;
-	client_t       *cli;
 	pthread_t      tid;
 	struct stat    sb;
 	struct group   *gr;
@@ -284,6 +277,7 @@ main(int argc, char *argv[])
 	struct dirent  *dp, *dp2;
 	struct timeval tv;
 	struct sockaddr_un s_addr;
+
 
 	fflag = false;
 	while ((ch = getopt(argc, argv, "fh")) != -1) {
@@ -441,6 +435,8 @@ main(int argc, char *argv[])
 	logprintx("%s started", PROGRAM);
 
 	/* Get all currently installed disks. */
+	SLIST_INIT(&devs);
+
 	if (chdir(_PATH_DEV) == -1)
 		die("chdir(%s)", _PATH_DEV);
 	if ((dirp = opendir(".")) == NULL)
@@ -606,19 +602,6 @@ lockpidfile()
 	(void)ftruncate(fileno(lockfp), ftell(lockfp));
 }
 
-static sdev_t *
-access_dev(sdev_t *devp)
-{
-	if (pthread_mutex_lock(&devlsmtx) == 0) {
-		if (pthread_mutex_lock(&devp->mtx) == 0) {
-			(void)pthread_mutex_unlock(&devlsmtx);
-			return (devp);
-		}
-		(void)pthread_mutex_unlock(&devlsmtx);
-	}
-	return (NULL);
-}
-
 static int
 wait_for_mutex(pthread_mutex_t *mtx, int secs)
 {
@@ -638,17 +621,19 @@ wait_for_mutex(pthread_mutex_t *mtx, int secs)
 static sdev_t *
 lookup_dev(const char *dev)
 {
-	int i;
+	sdev_t *devp;
+	struct devlist_s *ep;
 
 	dev = devbasename(dev);
 
 	(void)pthread_mutex_lock(&devlsmtx);
-	for (i = 0; i < ndevs; i++) {
-		if (strcmp(dev, devbasename(devs[i]->dev)) == 0) {
-			(void)pthread_mutex_lock(&devs[i]->mtx);
+	SLIST_FOREACH(ep, &devs, next) {
+		devp = ep->devp;
+		if (strcmp(dev, devbasename(devp->dev)) == 0) {
+			(void)pthread_mutex_lock(&devp->mtx);
 			(void)pthread_mutex_unlock(&devlsmtx);
 
-			return (devs[i]);
+			return (devp);
 		}
 	}
 	(void)pthread_mutex_unlock(&devlsmtx);
@@ -659,16 +644,19 @@ lookup_dev(const char *dev)
 static sdev_t *
 lookup_dev_timed(const char *dev, int *error, int secs)
 {
-	int i;
+	sdev_t *devp;
+	struct devlist_s *ep;
 
 	dev = devbasename(dev);
 
 	(void)pthread_mutex_lock(&devlsmtx);
-	for (i = *error = 0; i < ndevs; i++) {
-		if (strcmp(dev, devbasename(devs[i]->dev)) == 0) {
-			if (wait_for_mutex(&devs[i]->mtx, secs) > 0) {
+	*error = 0;
+	SLIST_FOREACH(ep, &devs, next) {
+		devp = ep->devp;
+		if (strcmp(dev, devbasename(devp->dev)) == 0) {
+			if (wait_for_mutex(&devp->mtx, secs) > 0) {
 				(void)pthread_mutex_unlock(&devlsmtx);
-				return (devs[i]);
+				return (devp);
 			} else
 				*error = errno;
 			(void)pthread_mutex_unlock(&devlsmtx);
@@ -688,10 +676,13 @@ add_client(int socket)
 	char	      **p;
 	uid_t	      uid;
 	gid_t	      gid, gids[24];
-	client_t      **cv, *cp;
+	sdev_t	      *devp;
+	client_t      *cp;
 	static int    id = 1;
 	struct group  *grp;
 	struct passwd *pw;
+	struct devlist_s *ep, *nep;
+	struct clilist_s *cep;
 
 	cp = NULL; errno = 0;
 	if (getpeereid(socket, &uid, &gid) == -1 ||
@@ -722,13 +713,10 @@ add_client(int socket)
 		logprintx("Client with UID %d rejected", uid);
 		return (NULL);
 	}
-	cv = realloc(clients, sizeof(client_t *) * (nclients + 1));
-	if (cv == NULL)
-		goto error;
-	clients = cv;
-	if ((clients[nclients] = malloc(sizeof(client_t))) == NULL)
-		goto error;
-	cp = clients[nclients];
+	if ((cp = malloc(sizeof(client_t))) == NULL ||
+	    (cep = malloc(sizeof(struct clilist_s))) == NULL)
+		die("malloc()");
+	cep->cli = cp;
 	if ((cp->gids = malloc((n + 1) * sizeof(gid_t))) == NULL)
 		goto error;
 	(void)memcpy(cp->gids, gids, n * sizeof(gid_t));
@@ -737,24 +725,29 @@ add_client(int socket)
 	cp->uid	 = uid;
 	cp->slen = cp->rd = 0;
 	cp->overflow = false;
-	cp->nblocked = 0;
+	SLIST_INIT(&cp->blocked);
 
 	/* 
 	 * Send the client the current list of mountable devs.
 	 */
 	(void)pthread_mutex_lock(&devlsmtx);
-	for (n = 0; n < ndevs; n++) {
-		if (pthread_mutex_trylock(&devs[n]->mtx) != 0) {
-			cp->blocked[cp->nblocked++] = devs[n];
+
+	SLIST_FOREACH(ep, &devs, next) {
+		devp = ep->devp;
+		if (pthread_mutex_trylock(&devp->mtx) != 0) {
+			if ((nep = malloc(sizeof(struct devlist_s))) == NULL)
+				die("malloc()");
+			nep->devp = devp;
+			SLIST_INSERT_HEAD(&cp->blocked, nep, next);
 			continue;
 		}
-		if (devs[n]->visible)
-			notify(cp, devs[n], true);
-		(void)pthread_mutex_unlock(&devs[n]->mtx);
+		if (devp->visible)
+			notify(cp, devp, true);
+		(void)pthread_mutex_unlock(&devp->mtx);
 	}
 	/* Terminate device list output. */
 	cliprint(cp, "=");
-	nclients++;
+	SLIST_INSERT_HEAD(&clis, cep, next);
 	logprintx("Client with UID %d connected", uid);
 
 	(void)pthread_create(&cp->tid, NULL, client_thr, cp);
@@ -776,35 +769,35 @@ error:
 static void
 del_client(client_t *cli)
 {
-	int i;
+	struct clilist_s *ep;
 
-	for (i = 0; i < nclients && cli != clients[i]; i++)
-		;
-	if (i == nclients)
+	SLIST_FOREACH(ep, &clis, next) {
+		if (cli == ep->cli)
+			break;
+	}
+	if (cli != ep->cli)
 		return;
 	logprintx("Client with UID %d disconnected", cli->uid);
 	if (cli->s > -1)
 		(void)close(cli->s);
 	free(cli->gids);
 	free(cli);
-	
-	for (; i < nclients - 1; i++)
-		clients[i] = clients[i + 1];
-	nclients--;
+	SLIST_REMOVE(&clis, ep, clilist_s, next);
 }
 
 static void *
 client_thr(void *data)
 {
-	int	  n, i, error, bi;
+	int	  n, error;
 	fd_set	  rset;
 	client_t *cli = (client_t *)data;
 	struct timeval tv, *tp;
+	struct devlist_s *ep, *bep;
 
 	FD_ZERO(&rset);
-	for (bi = 0;;) {
+	for (;;) {
 		FD_SET(cli->s, &rset);
-		if (cli->nblocked > bi) {
+		if (!SLIST_EMPTY(&cli->blocked)) {
 			tv.tv_sec  = 1;
 			tv.tv_usec = 0;
 			tp = &tv;
@@ -820,15 +813,18 @@ client_thr(void *data)
 			 * blocked during the connection phase.
 			 */
 			(void)pthread_mutex_lock(&devlsmtx);
-			for (i = 0; i < ndevs; i++) {
-				if (devs[i] == cli->blocked[bi])
-					break;
-			}
-			if (i < ndevs) {
-				if (pthread_mutex_trylock(&devs[i]->mtx) == 0) {
-					bi++;
-					notify(cli, devs[i], true);
+			SLIST_FOREACH(ep, &devs, next) {
+				SLIST_FOREACH(bep, &cli->blocked, next) {
+					if (ep->devp == bep->devp)
+						break;
 				}
+				if (ep != bep)
+					continue;
+				if (pthread_mutex_trylock(&ep->devp->mtx) != 0)
+					continue;
+				notify(cli, ep->devp, true);
+				SLIST_REMOVE(&cli->blocked, bep, devlist_s,
+				    next);
 			}
 			(void)pthread_mutex_unlock(&devlsmtx);
 		}
@@ -921,11 +917,13 @@ process_connreq(int ls)
 			die("accept()");
 		}
 	}
+	(void)pthread_mutex_lock(&clilsmtx);
 	if ((cli = add_client(cs)) == NULL) {
 		if (errno != 0)
 			logprint("add_client()");
-		return (NULL);
 	}
+	(void)pthread_mutex_unlock(&clilsmtx);
+
 	return (cli);
 }
 
@@ -993,8 +991,10 @@ process_devd_event(char *ev)
 	if (strcmp(devdevent.type, "CREATE") == 0) {
 		add_device(devdevent.cdev);
 	} else if (strcmp(devdevent.type, "DESTROY") == 0) {
-		if ((devp = lookup_dev(devdevent.cdev)) == NULL)
+		if ((devp = lookup_dev(devdevent.cdev)) == NULL) {
+			warnx("%s -> NULL", devdevent.cdev);
 			return;
+		}
 		/*
 		 * Do not delete cd devices.
 		 */
@@ -1050,9 +1050,11 @@ poll_thr(void *socket)
 static void
 add_to_pollqueue(sdev_t *devp)
 {
-	int   i, len;
+	int   len;
 	char *p;
+	struct devlist_s *ep;
 
+	warnx("Addind %s to pollqueue", devp->dev);
 	(void)pthread_mutex_lock(&pollqmtx);
 	for (p = devp->dev; !isdigit(*p); p++)
 		;
@@ -1065,36 +1067,35 @@ add_to_pollqueue(sdev_t *devp)
 		}
 		len = p - devp->dev + 1;
 	}
-	for (i = 0; i < queuesz; i++) {
-		if (strncmp(devp->dev, pollqueue[i]->dev, len) == 0) {
+	SLIST_FOREACH(ep, &pollq, next) {
+		if (strncmp(devp->dev, ep->devp->dev, len) == 0) {
 			(void)pthread_mutex_unlock(&pollqmtx);
 			return;
 		}
 	}
-	if ((pollqueue = realloc(pollqueue,
-	    sizeof(sdev_t *) * (queuesz + 1))) == NULL)
-		die("realloc()");
-	pollqueue[queuesz] = devp;
-	pollqueue[queuesz]->has_media = has_media(devp->dev);
-	queuesz++;
+	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
+		die("malloc()");
+	ep->devp = devp;
+	ep->devp->has_media = has_media(devp->dev);
+	SLIST_INSERT_HEAD(&pollq, ep, next);
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
 
 static void
 del_from_pollqueue(sdev_t *devp)
 {
-	int i;
+	struct devlist_s *ep;
 
 	(void)pthread_mutex_lock(&pollqmtx);
-	for (i = 0; i < queuesz &&  devp != pollqueue[i]; i++)
-		;
-	if (i == queuesz) {
+	SLIST_FOREACH(ep, &pollq, next) {
+		if (devp == ep->devp)
+			break;
+	}
+	if (ep == NULL) {
 		(void)pthread_mutex_unlock(&pollqmtx);
 		return;
 	}
-	for (; i < queuesz - 1; i++)
-		pollqueue[i] = pollqueue[i + 1];
-	queuesz--;
+	SLIST_REMOVE(&pollq, ep, devlist_s, next);
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
 
@@ -1106,6 +1107,7 @@ has_media(const char *dev)
 	bool   media;
 	off_t  size;
 	size_t blksz;
+	warnx("Polling %s", dev);
 
 	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
 		return (false);
@@ -1129,19 +1131,19 @@ has_media(const char *dev)
 static sdev_t *
 media_changed()
 {
-	static int i = 0;
+	static struct devlist_s *ep = NULL;
 
-	for (i = i >= queuesz ? 0 : i; i < queuesz; i++) {
-		if (has_media(pollqueue[i]->dev)) {
-			if (!pollqueue[i]->has_media) {
+	SLIST_FOREACH_FROM(ep, &pollq, next) {
+		if (has_media(ep->devp->dev)) {
+			if (!ep->devp->has_media) {
 				/* Media was inserted */
-				pollqueue[i]->has_media = true;
-				return (pollqueue[i++]);
+				ep->devp->has_media = true;
+				return (ep->devp);
 			}
-		} else if (pollqueue[i]->has_media) {
+		} else if (ep->devp->has_media) {
 			/* Media was removed */
-			pollqueue[i]->has_media = false;
-			return (pollqueue[i++]);
+			ep->devp->has_media = false;
+			return (ep->devp);
 		}
 	}
 	return (NULL);
@@ -2372,12 +2374,13 @@ add_ptp_device(const char *ugen)
 	sdev_t	    *devp;
 	const char  *dev;
 	struct stat sb;
+	struct devlist_s *ep;
 
 	dev = devbasename(ugen);
 	/* Check if we already have this device. */
 	len = strlen(dev);
-	for (i = 0; i < ndevs; i++) {
-		if (strcmp(dev, devs[i]->dev + sizeof(_PATH_DEV) - 1) == 0) {
+	SLIST_FOREACH(ep, &devs, next) {
+		if (strcmp(dev, ep->devp->dev + sizeof(_PATH_DEV) - 1) == 0) {
 			/* Device already exists. */
 			return (NULL);
 		}
@@ -2415,12 +2418,14 @@ add_ptp_device(const char *ugen)
 	devp->visible	  = true;
 	devp->mntpt	  = NULL;
 	devp->cmd_mounted = false;
-	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
-	if (devs == NULL)
-		die("realloc()");
-	devs[ndevs++] = devp;
-	notifybc(devp, true);
 	(void)pthread_mutex_init(&devp->mtx, NULL);
+
+	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
+		die("malloc()");
+	ep->devp = devp;
+	SLIST_INSERT_HEAD(&devs, ep, next);
+	
+	notifybc(devp, true);
 
 	return (devp);
 }
@@ -2432,12 +2437,14 @@ add_mtp_device(const char *ugen)
 	sdev_t	    *devp;
 	const char  *dev;
 	struct stat sb;
+	struct devlist_s *ep;
 
 	dev = devbasename(ugen);
 	/* Check if we already have this device. */
 	len = strlen(dev);
-	for (i = 0; i < ndevs; i++) {
-		if (strcmp(dev, devs[i]->dev + sizeof(_PATH_DEV) - 1) == 0) {
+
+	SLIST_FOREACH(ep, &devs, next) {
+		if (strcmp(dev, ep->devp->dev + sizeof(_PATH_DEV) - 1) == 0) {
 			/* Device already exists. */
 			return (NULL);
 		}
@@ -2477,10 +2484,12 @@ add_mtp_device(const char *ugen)
 	devp->mntpt	  = NULL;
 	devp->cmd_mounted = false;
 	(void)pthread_mutex_init(&devp->mtx, NULL);
-	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
-	if (devs == NULL)
-		die("realloc()");
-	devs[ndevs++] = devp;
+
+	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
+		die("malloc()");
+	ep->devp = devp;
+	SLIST_INSERT_HEAD(&devs, ep, next);
+
 	notifybc(devp, true);
 
 	return (devp);
@@ -2493,6 +2502,7 @@ add_fuse_device(const char *mntpt)
 	sdev_t	   *devp;
 	const char *p;
 	static int id = 0;
+	struct devlist_s *ep;
 
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
 		die("malloc()");
@@ -2524,10 +2534,12 @@ add_fuse_device(const char *mntpt)
 	if ((devp->mntpt = strdup(mntpt)) == NULL)
 		die("strdup()");
 	(void)pthread_mutex_init(&devp->mtx, NULL);
-	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
-	if (devs == NULL)
-		die("realloc()");
-	devs[ndevs++] = devp;
+
+	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
+		die("malloc()");
+	ep->devp = devp;
+	SLIST_INSERT_HEAD(&devs, ep, next);
+
 	notifybc(devp, true);
 
 	return (devp);
@@ -2541,13 +2553,14 @@ add_device(const char *devname)
 	sdev_t	    *devp, dev = { 0 };
 	const char  *p;
 	struct stat sb;
+	struct devlist_s *ep;
 
 	devname = devbasename(devname);
 
 	/* Check if we already have this device. */
 	len = strlen(devname);
-	for (i = 0; i < ndevs; i++) {
-		if (!strcmp(devname, devs[i]->dev + sizeof(_PATH_DEV) - 1)) {
+	SLIST_FOREACH(ep, &devs, next) {
+		if (!strcmp(devname, ep->devp->dev + sizeof(_PATH_DEV) - 1)) {
 			/* Device already exists. */
 			return (NULL);
 		}
@@ -2679,8 +2692,10 @@ add_device(const char *devname)
 	}
 	if (polling && devp->polling)
 		add_to_pollqueue(devp);
-	if (devp->has_media && devp->fs != NULL)
+	if (devp->has_media && devp->fs != NULL) {
+		warnx("%s HAS MEDIA", devp->dev);
 		devp->visible = true;
+	}
 	else if (devp->has_media && devp->st != NULL) {
 		switch (devp->st->type) {
 		case ST_CDDA:
@@ -2693,10 +2708,11 @@ add_device(const char *devname)
 		}
 	}
 	(void)pthread_mutex_init(&devp->mtx, NULL);
-	devs = realloc(devs, sizeof(sdev_t *) * (ndevs + 1));
-	if (devs == NULL)
-		die("realloc()");
-	devs[ndevs++] = devp;
+	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
+		die("malloc()");
+	ep->devp = devp;
+	SLIST_INSERT_HEAD(&devs, ep, next);
+	warnx("INSERTED %s", ep->devp->dev);
 	if (devp->st == NULL)
 		devp->visible = false;
 	if (devp->visible)
@@ -2711,39 +2727,39 @@ add_device(const char *devname)
 static void
 del_device(sdev_t *devp)
 {
-	int i, j;
+	int j;
+	struct devlist_s *ep;
 
-	for (i = 0; i < ndevs && devp != devs[i]; i++)
-		;
-	if (i == ndevs)
+	SLIST_FOREACH(ep, &devs, next) {
+		if (ep->devp == devp)
+			break;
+	}
+	if (devp != ep->devp)
 		return;
 	if (polling)
-		del_from_pollqueue(devs[i]);
-	if (devs[i]->has_media && devs[i]->visible)
-		notifybc(devs[i], false);
+		del_from_pollqueue(devp);
+	if (devp->has_media && devp->visible)
+		notifybc(devp, false);
 	/*
 	 * Try to remove the mount table entry if the device was removed
 	 * without unmounting it first.
 	 */
-	if (is_mntpt(devs[i]->mntpt)) {
-		(void)unmount(devs[i]->mntpt, MNT_FORCE);
-		(void)rmntpt(devs[i]->mntpt);
+	if (is_mntpt(devp->mntpt)) {
+		(void)unmount(devp->mntpt, MNT_FORCE);
+		(void)rmntpt(devp->mntpt);
 	}
-	free(devs[i]->mntpt);
-	free(devs[i]->dev);
-	free(devs[i]->name);
-	free(devs[i]->model);
-	free(devs[i]->realdev);
-	
+	free(devp->mntpt);
+	free(devp->dev);
+	free(devp->name);
+	free(devp->model);
+	free(devp->realdev);
 
-	for (j = 0; j < NGLBLPRFX && devs[i]->glabel[j] != NULL; j++)
-		free(devs[i]->glabel[j]);
-	(void)pthread_mutex_destroy(&devs[i]->mtx);
-	free(devs[i]);
-
-	for (; i < ndevs - 1; i++)
-		devs[i] = devs[i + 1];
-	ndevs--;
+	for (j = 0; j < NGLBLPRFX && devp->glabel[j] != NULL; j++)
+		free(devp->glabel[j]);
+	(void)pthread_mutex_destroy(&devp->mtx);
+	free(devp);
+	SLIST_REMOVE(&devs, ep, devlist_s, next);
+	free(ep);
 }
 
 static char *
@@ -3172,23 +3188,27 @@ cliprint(client_t *cli, const char *fmt, ...)
 static void
 cliprintbc(client_t *exclude, const char *fmt, ...)
 {
-	int	i, saved_errno;
+	int	saved_errno;
 	va_list	ap;
+	struct clilist_s *ep;
 
 	saved_errno = errno;
-	for (i = 0; i < nclients; i++) {
-		if (exclude != NULL && exclude->id == clients[i]->id)
+	(void)pthread_mutex_lock(&clilsmtx);
+
+	SLIST_FOREACH(ep, &clis, next) {
+		if (exclude != NULL && exclude->id == ep->cli->id)
 			continue;
 		va_start(ap, fmt);
-		(void)vsnprintf(clients[i]->msg, sizeof(clients[i]->msg) - 2,
+		(void)vsnprintf(ep->cli->msg, sizeof(ep->cli->msg) - 2,
 		    fmt, ap);
-		(void)strcat(clients[i]->msg, "\n");
-		if (send_string(clients[i]->s, clients[i]->msg) == -1 &&
+		(void)strcat(ep->cli->msg, "\n");
+		if (send_string(ep->cli->s, ep->cli->msg) == -1 &&
 		    errno == EPIPE) {
 			/* Client disconnected */
-			clisock_close(clients[i]);
+			clisock_close(ep->cli);
 		}
 	}
+	(void)pthread_mutex_unlock(&clilsmtx);
 	errno = saved_errno;
 }
 
@@ -3241,38 +3261,12 @@ notify(client_t *cli, sdev_t *devp, bool add)
 static void
 notifybc(sdev_t *devp, bool add)
 {
-	int i;
+	struct clilist_s *ep;
 
-	for (i = 0; i < nclients; i++)
-		notify(clients[i], devp, add);
-}
-
-/*
- * Reads lines from the client's socket, parses them and
- * takes actions accordingly.
- */
-static int
-serve_client(client_t *cli)
-{
-	int n, error;
-
-	/*
-	 * Read a line from socket. If the line is longer than
-	 * sizeof(buf), or if it contains unprintable bytes, read
-	 * until end of line, and send the client an error message.
-	 */
-	if ((n = client_readln(cli, &error)) == 0) {
-		return (0);
-	} else if (n > 0) {
-		exec_cmd(cli, cli->buf);
-		return (0);
-	}
-	if (error == SOCK_ERR_IO_ERROR)
-		logprint("client_readln() error. Closing client connection");
-	/* Client disconnected or error. */
-	clisock_close(cli);
-	
-	return (-1);
+	(void)pthread_mutex_lock(&clilsmtx);
+	SLIST_FOREACH(ep, &clis, next)
+		notify(ep->cli, devp, add);
+	(void)pthread_mutex_unlock(&clilsmtx);
 }
 
 static void
@@ -3496,17 +3490,21 @@ poll_mntbl()
 static void
 check_fuse_mount(struct statfs *sb, int nsb)
 {
-	int	   i, j;
+	int	   i;
 	bool	   found;
 	sdev_t	   *devp;
 	const char *q;
+	struct devlist_s *ep;
 
 	for (i = 0; i < nsb; i++) {
 		q = devbasename(sb[i].f_mntfromname);
 		/* Check for new FUSE device mounts */
 		if (strncmp(q, "fuse", 4) == 0) {
-			for (found = false, j = 0; j < ndevs && !found; j++) {
-				devp = devs[j];
+			found = false;
+			SLIST_FOREACH(ep, &devs, next) {
+				 if (found)
+					break;
+				devp = ep->devp;
 				if (devp->mntpt == NULL)
 					continue;
 				if (pthread_mutex_trylock(&devp->mtx) != 0)
@@ -3527,24 +3525,27 @@ check_fuse_mount(struct statfs *sb, int nsb)
 static void
 check_fuse_unmount(struct statfs *sb, int nsb)
 {
-	int  i, j;
-	bool found;
-
-	for (i = 0; i < ndevs; i++) {
-		if (devs[i]->st == NULL)
+	int	j;
+	bool	found;
+	sdev_t *devp;
+	struct devlist_s *ep;
+	
+	SLIST_FOREACH(ep, &devs, next) {
+		devp = ep->devp;
+		if (devp->st == NULL)
 			continue;
-		if (devs[i]->iface->type != IF_TYPE_FUSE)
+		if (devp->iface->type != IF_TYPE_FUSE)
 			continue;
-		if (pthread_mutex_trylock(&devs[i]->mtx) != 0)
+		if (pthread_mutex_trylock(&devp->mtx) != 0)
 			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
-			if (strcmp(devs[i]->mntpt, sb[j].f_mntonname) == 0)
+			if (strcmp(devp->mntpt, sb[j].f_mntonname) == 0)
 				found = true;
 		}
 		if (!found)
-			del_device(devs[i]);
+			del_device(devp);
 		else
-			(void)pthread_mutex_unlock(&devs[i]->mtx);
+			(void)pthread_mutex_unlock(&devp->mtx);
 	}
 }
 
@@ -3570,17 +3571,18 @@ match_glabel(sdev_t *devp, const char *dev)
 static void
 check_mntbl(struct statfs *sb, int nsb)
 {
-	int	   i, j;
+	int	   j;
 	bool	   found;
 	sdev_t	   *devp;
 	const char *q, *mntpt;
-
-	for (i = 0; i < ndevs; i++) {
-		if (devs[i]->st == NULL)
+	struct devlist_s *ep;
+	
+	SLIST_FOREACH(ep, &devs, next) {
+		devp = ep->devp;
+		if (devp->st == NULL)
 			continue;
-		if (devs[i]->iface->type == IF_TYPE_FUSE)
+		if (devp->iface->type == IF_TYPE_FUSE)
 			continue;
-		devp = devs[i];
 		if (pthread_mutex_trylock(&devp->mtx) != 0)
 			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {

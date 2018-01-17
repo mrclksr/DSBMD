@@ -27,6 +27,8 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <sys/queue.h>
+
 #include "fs.h"
 
 /*
@@ -138,13 +140,17 @@ typedef struct sdev_s {
 	pthread_mutex_t mtx;
 } sdev_t;
 
+struct devlist_s {
+	sdev_t *devp;
+	SLIST_ENTRY(devlist_s) next;
+};
+
 /*
  * Struct to manage clients.
  */
 typedef struct client_s {
 	int    s;			  /* Client socket. */
 	int    id;			  /* Unique ID */
-	int    nblocked;
 	bool   overflow;		  /* Read command string too long */
 	char   buf[64];			  /* String buffer for commands. */
 	char   msg[128];		  /* Message buffer. */
@@ -152,8 +158,13 @@ typedef struct client_s {
 	gid_t *gids;			  /* Client GIDs. */
 	size_t rd;			  /* # of bytes in buffer */
 	size_t slen;			  /* Len. of string in buffer. */
-	sdev_t *blocked[12];
+	SLIST_HEAD(, devlist_s) blocked;
 	pthread_t tid;
 } client_t;
+
+struct clilist_s {
+	client_t *cli;
+	SLIST_ENTRY(clilist_s) next;
+};
 
 #endif	/* !_DSBMD_H_ */
