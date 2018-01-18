@@ -11,7 +11,7 @@ CFGDIR	       	     = ${PREFIX}/etc
 DOCSDIR		    ?= ${PREFIX}/share/doc/${PROGRAM}
 DOCS		     = README
 SOURCES		     = ${PROGRAM}.c config.c dsbcfg/dsbcfg.c fs.c common.c
-PROGRAM_FLAGS	     = -O0 -g3 -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
+PROGRAM_FLAGS	     = -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_LOG=\"${LOGFILE}\"
 PROGRAM_FLAGS	    += -DPATH_PID_FILE=\"${PIDFILE}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_SOCKET=\"${SOCKETPATH}\"
