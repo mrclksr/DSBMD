@@ -126,6 +126,7 @@ typedef struct sdev_s {
 	bool	      polling;		  /* May be polled. */
 	bool	      visible;		  /* Visible to client? */
 	bool	      ejectable;
+	bool	      deleted;
 	char	      *name;		  /* Volume ID */
 	char	      *model;		  /* "<vendor> <product> <revision>" */
 	char	      *glabel[NGLBLPRFX]; /* GEOM labels. */
