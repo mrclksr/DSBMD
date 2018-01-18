@@ -142,6 +142,7 @@ static bool	is_parted(const char *);
 static bool	is_mountable(const char *);
 static bool	is_mntpt(const char *);
 static bool	check_permission(uid_t, gid_t *);
+static bool	dev_check_exists(const char *);
 static bool	usermount_set(void);
 static char	*read_devd_event(int, int *);
 static char	**extend_list(char **, int *, const char *);
@@ -162,6 +163,7 @@ static void	switcheids(uid_t, gid_t);
 static void	restoreids(void);
 static void	rmntpt(const char *);
 static void	cleanup(int);
+static void	cleanup_devlist(void);
 static void	del_device(sdev_t *);
 static void	del_client(client_t *);
 static void	clisock_close(client_t *);
@@ -193,6 +195,7 @@ static sdev_t	*lookup_dev(const char *);
 static client_t	*add_client(int);
 static client_t	*process_connreq(int);
 static const storage_type_t *get_storage_type(const char *);
+static void	set_deleted(sdev_t *);
 
 /*
  * Struct to represent the fields of a devd notify event.
@@ -247,6 +250,7 @@ struct command_s {
 	{ "size",    &cmd_size    }
 };
 
+static bool		devlist_dirty;
 static bool		polling	   = false; /* Do(n't) poll devices */
 static FILE	       *lockfp	   = NULL;  /* Filepointer for lock file. */
 static uid_t	       *allow_uids = NULL;  /* UIDs allowed to connect. */
@@ -277,7 +281,6 @@ main(int argc, char *argv[])
 	struct dirent  *dp, *dp2;
 	struct timeval tv;
 	struct sockaddr_un s_addr;
-
 
 	fflag = false;
 	while ((ch = getopt(argc, argv, "fh")) != -1) {
@@ -436,7 +439,6 @@ main(int argc, char *argv[])
 
 	/* Get all currently installed disks. */
 	SLIST_INIT(&devs);
-
 	if (chdir(_PATH_DEV) == -1)
 		die("chdir(%s)", _PATH_DEV);
 	if ((dirp = opendir(".")) == NULL)
@@ -512,11 +514,17 @@ main(int argc, char *argv[])
 			die("pthread_create()");
 		(void)pthread_detach(tid);
 	}
+#if 0
+	pthread_mutex_init(&devlsmtx, NULL);
+	pthread_mutex_init(&pollqmtx, NULL);
+	pthread_mutex_init(&mntblmtx, NULL);
+#endif
 
 	/* Main loop. */
 	for (mntchktime = 0;;) {
 		rset = allset;
 		tv.tv_sec = mntchkiv; tv.tv_usec = 0;
+
 		if (time(NULL) - mntchktime >= mntchkiv)
 			mntchktime = poll_mntbl();
 		switch (select(maxfd + 1, &rset, NULL, NULL, &tv)) {
@@ -526,15 +534,18 @@ main(int argc, char *argv[])
 			die("select()");
 			/* NOTREACHED */
 		case 0:
-		(void)pthread_mutex_lock(&mntblmtx);
 			mntchktime = poll_mntbl();
-		(void)pthread_mutex_unlock(&mntblmtx);
 			continue;
 		}
+		if (devlist_dirty)
+			cleanup_devlist();
 		if (FD_ISSET(dsock, &rset)) {
 			/* New devd event. */
-			if ((ev = read_devd_event(dsock, &error)) != NULL)
+			if ((ev = read_devd_event(dsock, &error)) != NULL) {
+				pthread_mutex_lock(&devlsmtx);
 				process_devd_event(ev);
+				pthread_mutex_unlock(&devlsmtx);
+			}
 			if (error == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
 				FD_CLR(dsock, &allset);
@@ -629,6 +640,8 @@ lookup_dev(const char *dev)
 	(void)pthread_mutex_lock(&devlsmtx);
 	SLIST_FOREACH(ep, &devs, next) {
 		devp = ep->devp;
+		if (devp->deleted)
+			continue;
 		if (strcmp(dev, devbasename(devp->dev)) == 0) {
 			(void)pthread_mutex_lock(&devp->mtx);
 			(void)pthread_mutex_unlock(&devlsmtx);
@@ -653,6 +666,8 @@ lookup_dev_timed(const char *dev, int *error, int secs)
 	*error = 0;
 	SLIST_FOREACH(ep, &devs, next) {
 		devp = ep->devp;
+		if (devp->deleted)
+			continue;
 		if (strcmp(dev, devbasename(devp->dev)) == 0) {
 			if (wait_for_mutex(&devp->mtx, secs) > 0) {
 				(void)pthread_mutex_unlock(&devlsmtx);
@@ -731,7 +746,6 @@ add_client(int socket)
 	 * Send the client the current list of mountable devs.
 	 */
 	(void)pthread_mutex_lock(&devlsmtx);
-
 	SLIST_FOREACH(ep, &devs, next) {
 		devp = ep->devp;
 		if (pthread_mutex_trylock(&devp->mtx) != 0) {
@@ -775,7 +789,7 @@ del_client(client_t *cli)
 		if (cli == ep->cli)
 			break;
 	}
-	if (cli != ep->cli)
+	if (ep == NULL)
 		return;
 	logprintx("Client with UID %d disconnected", cli->uid);
 	if (cli->s > -1)
@@ -812,13 +826,14 @@ client_thr(void *data)
 			 * Show client the remaining devices that where
 			 * blocked during the connection phase.
 			 */
-			(void)pthread_mutex_lock(&devlsmtx);
+			if (pthread_mutex_trylock(&devlsmtx) != 0)
+				continue;
 			SLIST_FOREACH(ep, &devs, next) {
 				SLIST_FOREACH(bep, &cli->blocked, next) {
 					if (ep->devp == bep->devp)
 						break;
 				}
-				if (ep != bep)
+				if (bep == NULL)
 					continue;
 				if (pthread_mutex_trylock(&ep->devp->mtx) != 0)
 					continue;
@@ -998,9 +1013,10 @@ process_devd_event(char *ev)
 		/*
 		 * Do not delete cd devices.
 		 */
-		if (devp->iface->type != IF_TYPE_CD)
-			del_device(devp);
-		else
+		if (devp->iface->type != IF_TYPE_CD) {
+			set_deleted(devp);
+			(void)pthread_mutex_unlock(&devp->mtx);
+		} else
 			(void)pthread_mutex_unlock(&devp->mtx);
 	}
 }
@@ -1037,12 +1053,13 @@ poll_thr(void *socket)
  	s = *(int *)socket;
 	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 	for (;; sleep(polliv)) {
+		(void)pthread_mutex_lock(&pollqmtx);
 		while ((devp = media_changed()) != NULL) {
-			if (pthread_mutex_trylock(&devp->mtx) != 0)
-				continue;
+			(void)pthread_mutex_lock(&devp->mtx);
 			update_device(devp);
 			(void)pthread_mutex_unlock(&devp->mtx);
 		}
+		(void)pthread_mutex_unlock(&pollqmtx);
 	}
 	return (NULL);
 }
@@ -1054,7 +1071,6 @@ add_to_pollqueue(sdev_t *devp)
 	char *p;
 	struct devlist_s *ep;
 
-	warnx("Addind %s to pollqueue", devp->dev);
 	(void)pthread_mutex_lock(&pollqmtx);
 	for (p = devp->dev; !isdigit(*p); p++)
 		;
@@ -1107,7 +1123,6 @@ has_media(const char *dev)
 	bool   media;
 	off_t  size;
 	size_t blksz;
-	warnx("Polling %s", dev);
 
 	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
 		return (false);
@@ -1134,6 +1149,8 @@ media_changed()
 	static struct devlist_s *ep = NULL;
 
 	SLIST_FOREACH_FROM(ep, &pollq, next) {
+		if (ep->devp->deleted)
+			continue;
 		if (has_media(ep->devp->dev)) {
 			if (!ep->devp->has_media) {
 				/* Media was inserted */
@@ -1201,7 +1218,11 @@ update_device(sdev_t *devp)
 				 * first.
 				 * Unmount device and remove mount point.
 				 */
+				for (; pthread_mutex_trylock(&mntblmtx) != 0;
+				    usleep(5000))
+					;
 				(void)unmount(devp->mntpt, MNT_FORCE);
+				(void)pthread_mutex_unlock(&mntblmtx);
 				rmntpt(devp->mntpt);
 				free(devp->mntpt);
 				devp->mntpt   = NULL;
@@ -1882,9 +1903,7 @@ unmount_device(client_t *cli, sdev_t *devp, bool force, bool eject)
 	devp->mounted = false;
 	(void)change_owner(devp, devp->owner);
 	if (devp->iface->type == IF_TYPE_FUSE)
-		del_device(devp);
-	sleep(1);
-
+		set_deleted(devp);
 	return (0);
 }
 
@@ -2367,24 +2386,37 @@ get_da_storage_type(const char *devname)
 	return (type);
 }
 
+static bool
+dev_check_exists(const char *dev)
+{
+	struct devlist_s *ep;
+
+	dev = devbasename(dev);
+	/* Check if we already have this device. */
+	SLIST_FOREACH(ep, &devs, next) {
+		if (ep->devp->deleted)
+			continue;
+		if (strcmp(dev, ep->devp->dev + sizeof(_PATH_DEV) - 1) == 0) {
+			/* Device already exists. */
+			return (true);
+		}
+	}
+	return (false);
+}
+
 static sdev_t *
 add_ptp_device(const char *ugen)
 {
-	int	    i, len;
+	int	    i;
 	sdev_t	    *devp;
 	const char  *dev;
 	struct stat sb;
 	struct devlist_s *ep;
 
-	dev = devbasename(ugen);
 	/* Check if we already have this device. */
-	len = strlen(dev);
-	SLIST_FOREACH(ep, &devs, next) {
-		if (strcmp(dev, ep->devp->dev + sizeof(_PATH_DEV) - 1) == 0) {
-			/* Device already exists. */
-			return (NULL);
-		}
-	}
+	if (dev_check_exists(ugen))
+		return (NULL);
+	dev = devbasename(ugen);
 	if (devstat(ugen, &sb) == -1)
 		return (NULL);
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
@@ -2416,6 +2448,7 @@ add_ptp_device(const char *ugen)
 	devp->polling     = false;
 	devp->ejectable	  = false;
 	devp->visible	  = true;
+	devp->deleted	  = false;
 	devp->mntpt	  = NULL;
 	devp->cmd_mounted = false;
 	(void)pthread_mutex_init(&devp->mtx, NULL);
@@ -2433,22 +2466,16 @@ add_ptp_device(const char *ugen)
 static sdev_t *
 add_mtp_device(const char *ugen)
 {
-	int	    i, len;
+	int	    i;
 	sdev_t	    *devp;
 	const char  *dev;
 	struct stat sb;
 	struct devlist_s *ep;
 
-	dev = devbasename(ugen);
 	/* Check if we already have this device. */
-	len = strlen(dev);
-
-	SLIST_FOREACH(ep, &devs, next) {
-		if (strcmp(dev, ep->devp->dev + sizeof(_PATH_DEV) - 1) == 0) {
-			/* Device already exists. */
-			return (NULL);
-		}
-	}
+	if (dev_check_exists(ugen))
+		return (NULL);
+	dev = devbasename(ugen);
 	if (devstat(ugen, &sb) == -1)
 		return (NULL);
 	if ((devp = malloc(sizeof(sdev_t))) == NULL)
@@ -2481,6 +2508,7 @@ add_mtp_device(const char *ugen)
 	devp->polling     = false;
 	devp->ejectable	  = false;
 	devp->visible	  = true;
+	devp->deleted	  = false;
 	devp->mntpt	  = NULL;
 	devp->cmd_mounted = false;
 	(void)pthread_mutex_init(&devp->mtx, NULL);
@@ -2529,6 +2557,7 @@ add_fuse_device(const char *mntpt)
 	devp->has_media	  = true;
 	devp->polling	  = false;
 	devp->visible	  = true;
+	devp->deleted	  = false;
 	devp->ejectable	  = false;
 	devp->cmd_mounted = false;
 	if ((devp->mntpt = strdup(mntpt)) == NULL)
@@ -2548,23 +2577,17 @@ add_fuse_device(const char *mntpt)
 static sdev_t *
 add_device(const char *devname)
 {
-	int	    len, i, j, speed, fd;
+	int	    i, j, speed, fd;
 	char	    **v, *diskname, *path, *realdev;
 	sdev_t	    *devp, dev = { 0 };
 	const char  *p;
 	struct stat sb;
 	struct devlist_s *ep;
 
-	devname = devbasename(devname);
-
 	/* Check if we already have this device. */
-	len = strlen(devname);
-	SLIST_FOREACH(ep, &devs, next) {
-		if (!strcmp(devname, ep->devp->dev + sizeof(_PATH_DEV) - 1)) {
-			/* Device already exists. */
-			return (NULL);
-		}
-	}
+	if (dev_check_exists(devname))
+		return (NULL);
+	devname = devbasename(devname);
 	if ((dev.iface = iface_from_name(devname)) == NULL)
 		return (NULL);
 	dev.polling = false;
@@ -2655,6 +2678,7 @@ add_device(const char *devname)
 	devp->realdev     = dev.realdev;
 	devp->has_media   = dev.has_media;
 	devp->visible	  = false;
+	devp->deleted	  = false;
 	devp->ejectable   = dev.ejectable;
 	devp->cmd_mounted = false;
 
@@ -2721,6 +2745,42 @@ add_device(const char *devname)
 	return (devp);
 }
 
+static void
+set_deleted(sdev_t *devp)
+{
+	if (devp->has_media && devp->visible)
+		notifybc(devp, false);
+	devp->deleted = true;
+	devp->visible = false;
+	devlist_dirty = true;
+}
+
+static void
+cleanup_devlist()
+{
+	int n;
+	struct devlist_s *ep;
+
+	n = 0;
+
+	if (pthread_mutex_trylock(&devlsmtx) != 0)
+		return;
+	SLIST_FOREACH(ep, &devs, next) {
+		if (!ep->devp->deleted)
+			continue;
+		n++;
+		if (pthread_mutex_trylock(&ep->devp->mtx) != 0)
+			continue;
+		del_device(ep->devp);
+		n--;
+	}
+	if (n > 0)
+		devlist_dirty = true;
+	else
+		devlist_dirty = false;
+	(void)pthread_mutex_unlock(&devlsmtx);
+}
+
 /*
  * Removes the given device object from the device list.
  */
@@ -2734,12 +2794,10 @@ del_device(sdev_t *devp)
 		if (ep->devp == devp)
 			break;
 	}
-	if (devp != ep->devp)
+	if (ep == NULL)
 		return;
 	if (polling)
 		del_from_pollqueue(devp);
-	if (devp->has_media && devp->visible)
-		notifybc(devp, false);
 	/*
 	 * Try to remove the mount table entry if the device was removed
 	 * without unmounting it first.
@@ -3056,7 +3114,7 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 		 * further commands to the device, we let it vanish.
 		 */
 		if (devp->st != NULL && devp->st->type == ST_USBDISK)
-			del_device(devp);
+			set_deleted(devp);
 		else if (devp->iface->type == IF_TYPE_CD) {
 			/*
 			 * In case of CD/DVD notify the client immediately,
@@ -3306,6 +3364,11 @@ exec_cmd(client_t *cli, char *cmdstr)
 		    ERR_SYNTAX_ERROR);
 		return;
 	}
+	if (strcmp(argv[0], "speed") == 0) {
+		char *tmp;
+		tmp = argv[argc - 2]; argv[argc - 2] = argv[argc - 1];
+		argv[argc - 1] = tmp;
+	}
 	if ((devp = lookup_dev_timed(argv[argc - 1], &error, 5)) == NULL) {
 		if (error == ETIMEDOUT) {
 			cliprint(cli, "E:command=%s:code=%d", argv[0],
@@ -3318,18 +3381,6 @@ exec_cmd(client_t *cli, char *cmdstr)
 	} else if (!devp->visible) {
 		cliprint(cli, "E:command=eject:code=%d", ERR_NO_SUCH_DEVICE);
 		return;
-	}
-	argv[argc - 1] = NULL;
-	ts.tv_sec  = dsbcfg_getval(cfg, CFG_PROCMAXWAIT).integer;
-	ts.tv_nsec = 0;
-
-	if (pthread_mutex_timedlock(&devp->mtx, &ts) == -1) {
-		if (errno == ETIMEDOUT) {
-			cliprint(cli, "E:command=%s:code=%d", argv[0],
-			    ERR_TIMEOUT);
-			return;
-		}
-		die("pthread_mutex_timedwait()");
 	}
 	cp->cmdf(cli, devp, argv + 1);
 	(void)pthread_mutex_unlock(&devp->mtx);
@@ -3479,9 +3530,13 @@ poll_mntbl()
 	} else
 		logprint("getfsstat()");
 	if (n > 0) {
+		(void)pthread_mutex_lock(&devlsmtx);
+		(void)pthread_mutex_lock(&mntblmtx);
 		check_mntbl(buf, n);
 		check_fuse_mount(buf, n);
 		check_fuse_unmount(buf, n);
+		(void)pthread_mutex_unlock(&mntblmtx);
+		(void)pthread_mutex_unlock(&devlsmtx);
 	}
 
 	return (time(NULL));
@@ -3507,11 +3562,10 @@ check_fuse_mount(struct statfs *sb, int nsb)
 				devp = ep->devp;
 				if (devp->mntpt == NULL)
 					continue;
-				if (pthread_mutex_trylock(&devp->mtx) != 0)
+				if (devp->deleted)
 					continue;
 				if (strcmp(devp->mntpt, sb[i].f_mntonname) == 0)
 					found = true;
-				(void)pthread_mutex_unlock(&devp->mtx);
 			}
 			if (!found) {
 				/* New FUSE device mounted. */
@@ -3536,6 +3590,8 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 			continue;
 		if (devp->iface->type != IF_TYPE_FUSE)
 			continue;
+		if (devp->deleted)
+			continue;
 		if (pthread_mutex_trylock(&devp->mtx) != 0)
 			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
@@ -3543,9 +3599,8 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 				found = true;
 		}
 		if (!found)
-			del_device(devp);
-		else
-			(void)pthread_mutex_unlock(&devp->mtx);
+			set_deleted(devp);
+		(void)pthread_mutex_unlock(&devp->mtx);
 	}
 }
 
@@ -3581,9 +3636,9 @@ check_mntbl(struct statfs *sb, int nsb)
 		devp = ep->devp;
 		if (devp->st == NULL)
 			continue;
-		if (devp->iface->type == IF_TYPE_FUSE)
+		if (devp->deleted)
 			continue;
-		if (pthread_mutex_trylock(&devp->mtx) != 0)
+		if (devp->iface->type == IF_TYPE_FUSE)
 			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			q = devbasename(sb[j].f_mntfromname);
@@ -3622,10 +3677,8 @@ check_mntbl(struct statfs *sb, int nsb)
 			}
 		} else if (devp->mounted) {
 			if (devp->cmd_mounted) {
-				if (is_mntpt(devp->mntpt)) {
-					(void)pthread_mutex_unlock(&devp->mtx);
+				if (is_mntpt(devp->mntpt))
 					continue;
-				}
 			}	
 			/* Unmounted */
 			rmntpt(devp->mntpt);
@@ -3637,7 +3690,6 @@ check_mntbl(struct statfs *sb, int nsb)
 			devp->mntpt   = NULL;
 			devp->mounted = false;
 		}
-		(void)pthread_mutex_unlock(&devp->mtx);
 	}
 }
 
