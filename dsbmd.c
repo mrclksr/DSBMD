@@ -36,8 +36,6 @@
 #include <sys/un.h>
 #include <sys/user.h>
 #include <sys/proc.h>
-#include <sys/param.h>
-#include <sys/queue.h>
 #include <sys/ucred.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -75,12 +73,12 @@
 #include <isofs/cd9660/iso.h>
 #include <libusb20_desc.h>
 #include <libusb20.h>
+
 #include "common.h"
 #include "fs.h"
 #include "dsbmd.h"
 #include "dsbcfg/dsbcfg.h"
 #include "config.h"
-#include <sys/iconv.h>
 
 #define MNTPTMODE	   (S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH)
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
@@ -156,7 +154,6 @@ static void	cleanup(int);
 static void	cleanup_devlist(void);
 static void	del_device(sdev_t *);
 static void	del_client(client_t *);
-static void	clisock_close(client_t *);
 static void	update_device(sdev_t *);
 static void	parse_devd_event(char *);
 static void	free_iovec(struct iovec *);
@@ -241,19 +238,19 @@ struct command_s {
 };
 
 static bool	devlist_dirty = false;
-static bool	polling	      = false; /* Do(n't) poll devices */
-static FILE	*lockfp	      = NULL;  /* Filepointer for lock file. */
-static uid_t	*allow_uids   = NULL;  /* UIDs allowed to connect. */
-static gid_t	*allow_gids   = NULL;  /* GIDs allowed to connect. */
+static bool	polling	      = false;	/* Do(n't) poll devices */
+static FILE	*lockfp	      = NULL;	/* Filepointer for lock file. */
+static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
+static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
 static dsbcfg_t	*cfg	      = NULL;
 
-static pthread_mutex_t  pollqmtx   = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t  mntblmtx   = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t  devlsmtx   = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t  clilsmtx   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  pollqmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  mntblmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  devlsmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  clilsmtx = PTHREAD_MUTEX_INITIALIZER;
 
-static SLIST_HEAD(, devlist_s) devs;    /* List of mountable devs. */
-static SLIST_HEAD(, clilist_s) clis;    /* List of connected clients. */
+static SLIST_HEAD(, devlist_s) devs;	/* List of mountable devs. */
+static SLIST_HEAD(, clilist_s) clis;	/* List of connected clients. */
 static SLIST_HEAD(, devlist_s) pollq;	/* Poll queue */
 
 int
@@ -743,6 +740,7 @@ del_client(client_t *cli)
 {
 	struct clilist_s *ep;
 
+	(void)pthread_mutex_lock(&clilsmtx);
 	SLIST_FOREACH(ep, &clis, next) {
 		if (cli == ep->cli)
 			break;
@@ -750,11 +748,11 @@ del_client(client_t *cli)
 	if (ep == NULL)
 		return;
 	logprintx("Client with UID %d disconnected", cli->uid);
-	if (cli->s > -1)
-		(void)close(cli->s);
+	(void)close(cli->s);
 	free(cli->gids);
 	free(cli);
 	SLIST_REMOVE(&clis, ep, clilist_s, next);
+	(void)pthread_mutex_unlock(&clilsmtx);
 }
 
 static void *
@@ -766,8 +764,8 @@ client_thr(void *data)
 	struct timeval tv, *tp;
 	struct devlist_s *ep, *bep;
 
-	FD_ZERO(&rset);
 	for (;;) {
+		FD_ZERO(&rset);
 		FD_SET(cli->s, &rset);
 		if (!SLIST_EMPTY(&cli->blocked)) {
 			tv.tv_sec  = 1;
@@ -775,7 +773,7 @@ client_thr(void *data)
 			tp = &tv;
 		} else
 			tp = NULL;
-		if (select(cli->s + 1, &rset, NULL, NULL, tp) == -1) {
+		if ((n = select(cli->s + 1, &rset, NULL, NULL, tp)) == -1) {
 			if (errno == EINTR)
 				continue;
 			die("select()");
@@ -1062,22 +1060,17 @@ poll_thr(void *socket)
 static void
 add_to_pollqueue(sdev_t *devp)
 {
-	int   len;
-	char *p;
+	size_t	    len;
+	const char *dev;
 	struct devlist_s *ep;
 
+	dev = devbasename(devp->dev);
 	(void)pthread_mutex_lock(&pollqmtx);
-	for (p = devp->dev; !isdigit(*p); p++)
-		;
-	if (p[1] == '\0')
-		len = strlen(devp->dev);
-	else {
-		if ((p[1] == 's' || p[1] == 'p') && isdigit(p[2])) {
-			/* Do not add slices. */
-			return;
-		}
-		len = p - devp->dev + 1;
+	if (match_part_dev(dev, 0)) {
+		/* Do not add slices */
+		return;
 	}
+	len = strlen(devp->dev);
 	SLIST_FOREACH(ep, &pollq, next) {
 		if (strncmp(devp->dev, ep->devp->dev, len) == 0) {
 			(void)pthread_mutex_unlock(&pollqmtx);
@@ -2579,8 +2572,6 @@ add_device(const char *devname)
 	struct stat sb;
 	struct devlist_s *ep;
 
-	warnx("%ld Adding device %s", time(NULL), devname);
-
 	/* Check if we already have this device. */
 	if (dev_check_exists(devname))
 		return (NULL);
@@ -2713,10 +2704,8 @@ add_device(const char *devname)
 	}
 	if (polling && devp->polling)
 		add_to_pollqueue(devp);
-	if (devp->has_media && devp->fs != NULL) {
-		warnx("%s HAS MEDIA", devp->dev);
+	if (devp->has_media && devp->fs != NULL)
 		devp->visible = true;
-	}
 	else if (devp->has_media && devp->st != NULL) {
 		switch (devp->st->type) {
 		case ST_CDDA:
@@ -2733,7 +2722,6 @@ add_device(const char *devname)
 		die("malloc()");
 	ep->devp = devp;
 	SLIST_INSERT_HEAD(&devs, ep, next);
-	warnx("INSERTED %s", ep->devp->dev);
 	if (devp->st == NULL)
 		devp->visible = false;
 	if (devp->visible)
@@ -3192,14 +3180,6 @@ uconnect(const char *path)
 	return (s);
 }
 
-static void
-clisock_close(client_t *cli)
-{
-	if (cli->s > -1)
-		(void)close(cli->s);
-	cli->s = -1;
-}
-
 static int
 send_string(int socket, const char *str)
 {
@@ -3233,10 +3213,7 @@ cliprint(client_t *cli, const char *fmt, ...)
 	va_start(ap, fmt);
 	(void)vsnprintf(cli->msg, sizeof(cli->msg) - 2, fmt, ap);
 	(void)strcat(cli->msg, "\n");
-	if (send_string(cli->s, cli->msg) == -1 && errno == EPIPE) {
-		/* Client disconnected */
-		clisock_close(cli);
-	}
+	(void)send_string(cli->s, cli->msg);
 	errno = saved_errno;
 }
 
@@ -3257,11 +3234,7 @@ cliprintbc(client_t *exclude, const char *fmt, ...)
 		(void)vsnprintf(ep->cli->msg, sizeof(ep->cli->msg) - 2,
 		    fmt, ap);
 		(void)strcat(ep->cli->msg, "\n");
-		if (send_string(ep->cli->s, ep->cli->msg) == -1 &&
-		    errno == EPIPE) {
-			/* Client disconnected */
-			clisock_close(ep->cli);
-		}
+		(void)send_string(ep->cli->s, ep->cli->msg);
 	}
 	(void)pthread_mutex_unlock(&clilsmtx);
 	errno = saved_errno;
@@ -3361,11 +3334,14 @@ exec_cmd(client_t *cli, char *cmdstr)
 		return;
 	}
 	if (strcmp(argv[0], "speed") == 0) {
-		char *tmp;
-		tmp = argv[argc - 2]; argv[argc - 2] = argv[argc - 1];
+		/*
+		 * Because of a stupid syntax inconsistency, we have to
+		 * swap the speed and device arguments.
+		 */
+		char *tmp = argv[argc - 2];
+		argv[argc - 2] = argv[argc - 1];
 		argv[argc - 1] = tmp;
 	}
-	warnx("LOOKING UP DEVICE ...");
 	if ((devp = lookup_dev_timed(argv[argc - 1], &error, 5)) == NULL) {
 		if (error == ETIMEDOUT) {
 			cliprint(cli, "E:command=%s:code=%d", argv[0],
@@ -3379,7 +3355,6 @@ exec_cmd(client_t *cli, char *cmdstr)
 		cliprint(cli, "E:command=eject:code=%d", ERR_NO_SUCH_DEVICE);
 		return;
 	}
-	warnx("LOOKING UP DEVICE DONE");
 	cp->cmdf(cli, devp, argv + 1);
 	(void)pthread_mutex_unlock(&devp->mtx);
 }
@@ -3495,11 +3470,11 @@ cmd_unmount(client_t *cli, sdev_t *devp, char **argv)
 	(void)pthread_mutex_unlock(&mntblmtx);
 }
 
-
 static void
 cmd_quit(client_t *cli, sdev_t *unused, char **unused_argv)
 {
-	clisock_close(cli);
+	del_client(cli);
+	pthread_exit(NULL);
 }
 
 static time_t
@@ -3517,6 +3492,9 @@ poll_mntbl()
 		if ((buf = malloc(bufsz)) == NULL)
 			die("malloc()");
 	}
+	(void)pthread_mutex_lock(&devlsmtx);
+	(void)pthread_mutex_lock(&mntblmtx);
+
 	if ((n = getfsstat(buf, bufsz, MNT_WAIT)) != -1) {
 		while (n > 0 && n * sizeof(struct statfs) >= bufsz) {
 			bufsz += 8 * sizeof(struct statfs);
@@ -3528,14 +3506,12 @@ poll_mntbl()
 	} else
 		logprint("getfsstat()");
 	if (n > 0) {
-		(void)pthread_mutex_lock(&devlsmtx);
-		(void)pthread_mutex_lock(&mntblmtx);
 		check_mntbl(buf, n);
 		check_fuse_mount(buf, n);
 		check_fuse_unmount(buf, n);
-		(void)pthread_mutex_unlock(&mntblmtx);
-		(void)pthread_mutex_unlock(&devlsmtx);
 	}
+	(void)pthread_mutex_unlock(&mntblmtx);
+	(void)pthread_mutex_unlock(&devlsmtx);
 
 	return (time(NULL));
 }
@@ -3590,15 +3566,12 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 			continue;
 		if (devp->deleted)
 			continue;
-		if (pthread_mutex_trylock(&devp->mtx) != 0)
-			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			if (strcmp(devp->mntpt, sb[j].f_mntonname) == 0)
 				found = true;
 		}
 		if (!found)
 			set_deleted(devp);
-		(void)pthread_mutex_unlock(&devp->mtx);
 	}
 }
 
