@@ -244,10 +244,10 @@ static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
 static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
 static dsbcfg_t	*cfg	      = NULL;
 
-static pthread_mutex_t  pollqmtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t  mntblmtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t  devlsmtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t  clilsmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t pollqmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t mntblmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t devlsmtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t clilsmtx = PTHREAD_MUTEX_INITIALIZER;
 
 static SLIST_HEAD(, devlist_s) devs;	/* List of mountable devs. */
 static SLIST_HEAD(, clilist_s) clis;	/* List of connected clients. */
@@ -3534,9 +3534,7 @@ check_fuse_mount(struct statfs *sb, int nsb)
 				 if (found)
 					break;
 				devp = ep->devp;
-				if (devp->mntpt == NULL)
-					continue;
-				if (devp->deleted)
+				if (devp->mntpt == NULL || devp->deleted)
 					continue;
 				if (strcmp(devp->mntpt, sb[i].f_mntonname) == 0)
 					found = true;
@@ -3560,11 +3558,8 @@ check_fuse_unmount(struct statfs *sb, int nsb)
 	
 	SLIST_FOREACH(ep, &devs, next) {
 		devp = ep->devp;
-		if (devp->st == NULL)
-			continue;
-		if (devp->iface->type != IF_TYPE_FUSE)
-			continue;
-		if (devp->deleted)
+		if (devp->deleted || devp->st == NULL ||
+		    devp->iface->type != IF_TYPE_FUSE)
 			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			if (strcmp(devp->mntpt, sb[j].f_mntonname) == 0)
@@ -3605,11 +3600,8 @@ check_mntbl(struct statfs *sb, int nsb)
 	
 	SLIST_FOREACH(ep, &devs, next) {
 		devp = ep->devp;
-		if (devp->st == NULL)
-			continue;
-		if (devp->deleted)
-			continue;
-		if (devp->iface->type == IF_TYPE_FUSE)
+		if (devp->deleted || devp->st == NULL ||
+		    devp->iface->type == IF_TYPE_FUSE)
 			continue;
 		for (j = 0, found = false; !found && j < nsb; j++) {
 			q = devbasename(sb[j].f_mntfromname);
