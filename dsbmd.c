@@ -360,6 +360,9 @@ main(int argc, char *argv[])
 		case UFS:
 			INITFS(i, UFS);
 			break;
+		case HFSP:
+			INITFS(i, HFSP);
+			break;
 		case CD9660:
 			INITFS(i, CD9660);
 			break;

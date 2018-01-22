@@ -58,6 +58,8 @@
 #define ISO9660_ID_OFFSET	     1
 #define ISO9660_ID		     "CD001"
 
+#define HFSP_VH_OFFSET		     1024
+
 #define EXFAT_ROOTDIR_CLUSTER_OFFSET 0x60   /* Cluster addr. of root dir */
 #define EXFAT_BPS_OFFSET	     0x6c   /* Bytes per sector */
 #define EXFAT_SPC_OFFSET	     0x6d   /* Sectors per cluster */
@@ -76,6 +78,7 @@ static bool is_ufs(FILE *);
 static bool is_ext(FILE *);
 static bool is_ext4(FILE *dev);
 static bool is_iso9660(FILE *);
+static bool is_hfsp(FILE *);
 
 fs_t fstype[] = {
 	{ "ufs",      UFS,     NULL, NULL,    NULL		    },
@@ -87,7 +90,8 @@ fs_t fstype[] = {
 	{ "exfat",    EXFAT,   NULL, NULL,    NULL		    },
 	{ "fuse",     FUSEFS,  NULL, NULL,    NULL		    },
 	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL		    },
-	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL		    }
+	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL		    },
+	{ "hfsp",     HFSP,    NULL, NULL,    NULL		    }
 };
 
 const int nfstypes = sizeof(fstype) / sizeof(fstype[0]);
@@ -102,7 +106,8 @@ static struct getfs_s {
 	{ is_ufs,      UFS     },
 	{ is_ext4,     EXT4    },
 	{ is_ext,      EXT     },
-	{ is_iso9660,  CD9660  }
+	{ is_iso9660,  CD9660  },
+	{ is_hfsp,     HFSP    }
 };
 
 static uint8_t *
@@ -268,6 +273,19 @@ is_exfat(FILE *dev)
 	if ((p = bbread(dev, 0, DFLTSBSZ)) == NULL)
 		return (false);
 	if (strncmp((char *)&p[3], "EXFAT", 5) == 0)
+		return (true);
+	return (false);
+}
+
+static bool
+is_hfsp(FILE *dev)
+{
+	uint8_t *p;
+
+	if ((p = bbread(dev, HFSP_VH_OFFSET, 2)) == NULL)
+		return (false);
+	if (strncmp((char *)p, "H+", 2) == 0 ||
+	    strncmp((char *)p, "Hx", 2) == 0)
 		return (true);
 	return (false);
 }
