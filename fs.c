@@ -81,17 +81,17 @@ static bool is_iso9660(FILE *);
 static bool is_hfsp(FILE *);
 
 fs_t fstype[] = {
-	{ "ufs",      UFS,     NULL, NULL,    NULL		    },
-	{ "cd9660",   CD9660,  NULL, NULL,    NULL		    },
-	{ "msdosfs",  MSDOSFS, NULL, "large", "large,uid=%u,gid=%g" },
-	{ "ntfs",     NTFS,    NULL, NULL,    NULL		    },
-	{ "ext2fs",   EXT,     NULL, NULL,    NULL		    },
-	{ "ext2fs",   EXT4,    NULL, NULL,    NULL		    },
-	{ "exfat",    EXFAT,   NULL, NULL,    NULL		    },
-	{ "fuse",     FUSEFS,  NULL, NULL,    NULL		    },
-	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL		    },
-	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL		    },
-	{ "hfsp",     HFSP,    NULL, NULL,    NULL		    }
+	{ "ufs",      UFS,     NULL, NULL,    NULL },
+	{ "cd9660",   CD9660,  NULL, NULL,    NULL },
+	{ "msdosfs",  MSDOSFS, NULL, NULL,    NULL },
+	{ "ntfs",     NTFS,    NULL, NULL,    NULL },
+	{ "ext2fs",   EXT,     NULL, NULL,    NULL },
+	{ "ext2fs",   EXT4,    NULL, NULL,    NULL },
+	{ "exfat",    EXFAT,   NULL, NULL,    NULL },
+	{ "fuse",     FUSEFS,  NULL, NULL,    NULL },
+	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL },
+	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL },
+	{ "hfsp",     HFSP,    NULL, NULL,    NULL }
 };
 
 const int nfstypes = sizeof(fstype) / sizeof(fstype[0]);
