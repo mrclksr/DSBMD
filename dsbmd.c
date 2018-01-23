@@ -1039,12 +1039,11 @@ devd_thr(void *unused)
 }
 
 static void *
-poll_thr(void *socket)
+poll_thr(void *unused)
 {
-	int	s, polliv;
+	int	polliv;
 	sdev_t *devp;
 
- 	s = *(int *)socket;
 	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 	for (;; sleep(polliv)) {
 		(void)pthread_mutex_lock(&pollqmtx);
