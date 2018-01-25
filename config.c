@@ -22,6 +22,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <err.h>
+
 #include "dsbcfg/dsbcfg.h"
 #include "config.h"
 
@@ -71,4 +73,21 @@ dsbcfg_vardef_t vardefs[] = {
 { "preload_kmods",         DSBCFG_VAR_STRINGS, CFG_PRELOAD_KMODS	     },
 { "cfgversion",		   DSBCFG_VAR_INTEGER, CFG_CFG_VERSION,	    VAL(0)   }
 };
+
+void
+check_cfg_version(dsbcfg_t *cfg)
+{
+	if (dsbcfg_getval(cfg, CFG_CFG_VERSION).integer < CFGVERSION) {
+		warnx("***********************************************"	\
+		      "******************");
+		warnx("WARNING");
+		warnx("");
+		warnx("Your dsbmd.conf seems to be outdated. Please " 	\
+		      "recreate it from");
+		warnx("dsbmd.conf.sample, or merge the files.");
+		warnx("");
+		warnx("***********************************************"	\
+		      "******************\n");
+	}
+}
 
