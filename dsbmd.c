@@ -576,7 +576,7 @@ wait_for_mutex(pthread_mutex_t *mtx, int secs)
 {
 	struct timespec ts;
 
-	ts.tv_sec  = secs;
+	ts.tv_sec  = secs + time(NULL);
 	ts.tv_nsec = 0;
 
 	if (pthread_mutex_timedlock(mtx, &ts) == -1) {
