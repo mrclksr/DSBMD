@@ -58,24 +58,14 @@
 #define CMD_EJECT		'E'
 #define CMD_SPEED		'V'
 
-#define ERR_ALREADY_MOUNTED	((1 << 8) + 0x01)
-#define ERR_PERMISSION_DENIED	((1 << 8) + 0x02)
-#define ERR_NOT_MOUNTED		((1 << 8) + 0x03)
-#define ERR_DEVICE_BUSY		((1 << 8) + 0x04)
-#define ERR_NO_SUCH_DEVICE	((1 << 8) + 0x05)
-#define ERR_MAX_CONN_REACHED	((1 << 8) + 0x06)
-#define ERR_NOT_EJECTABLE	((1 << 8) + 0x07)
-#define ERR_UNKNOWN_COMMAND	((1 << 8) + 0x08)
-#define ERR_UNKNOWN_OPTION	((1 << 8) + 0x09)
-#define ERR_SYNTAX_ERROR	((1 << 8) + 0x0a)
-#define ERR_NO_MEDIA		((1 << 8) + 0x0b)
-#define ERR_UNKNOWN_FILESYSTEM	((1 << 8) + 0x0c)
-#define ERR_UNKNOWN_ERROR	((1 << 8) + 0x0d)
-#define ERR_MNTCMD_FAILED	((1 << 8) + 0x0e)
-#define ERR_INVALID_ARGUMENT	((1 << 8) + 0x0f)
-#define ERR_STRING_TOO_LONG	((1 << 8) + 0x10)
-#define ERR_BAD_STRING		((1 << 8) + 0x11)
-#define ERR_TIMEOUT		((1 << 8) + 0x12)
+enum {
+	ERR_ALREADY_MOUNTED = 257, ERR_PERMISSION_DENIED, ERR_NOT_MOUNTED,
+	ERR_DEVICE_BUSY, ERR_NO_SUCH_DEVICE, ERR_MAX_CONN_REACHED,
+	ERR_NOT_EJECTABLE, ERR_UNKNOWN_COMMAND, ERR_UNKNOWN_OPTION,
+	ERR_SYNTAX_ERROR, ERR_NO_MEDIA, ERR_UNKNOWN_FILESYSTEM,
+	ERR_UNKNOWN_ERROR, ERR_MNTCMD_FAILED, ERR_INVALID_ARGUMENT,
+	ERR_STRING_TOO_LONG, ERR_BAD_STRING, ERR_TIMEOUT
+};
 
 typedef enum DEV_TYPES {
 	ST_HDD,		ST_MMC,
@@ -137,7 +127,6 @@ typedef struct sdev_s {
 	gid_t	      group;		  /* GID of device. */
 	const iface_t *iface;		  /* Interface type */
 	const storage_type_t *st;  	  /* Media/storage type */
-	pthread_mutex_t mtx;
 } sdev_t;
 
 struct devlist_s {
