@@ -988,6 +988,7 @@ del_from_pollqueue(sdev_t *devp)
 	SLIST_REMOVE(&pollq, ep, devlist_s, next);
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
+
 static bool
 has_media(const char *dev)
 {
@@ -2636,7 +2637,6 @@ del_device(sdev_t *devp)
 	free(devp);
 	SLIST_REMOVE(&devs, ep, devlist_s, next);
 	free(ep);
-
 }
 
 static char *
