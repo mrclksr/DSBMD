@@ -392,6 +392,10 @@ main(int argc, char *argv[])
 			break;
 		}
 	}
+	SLIST_INIT(&devs);
+	SLIST_INIT(&clis);
+	SLIST_INIT(&pollq);
+
 	/* Ready to deamonize. */
 	if (!fflag) {
 		for (i = 0; i < 2; i++) {
@@ -430,7 +434,6 @@ main(int argc, char *argv[])
 	logprintx("%s started", PROGRAM);
 
 	/* Get all currently installed disks. */
-	SLIST_INIT(&devs);
 	if (chdir(_PATH_DEV) == -1)
 		die("chdir(%s)", _PATH_DEV);
 	if ((dirp = opendir(".")) == NULL)
