@@ -285,18 +285,8 @@ main(int argc, char *argv[])
 	cfg = dsbcfg_read(NULL, PATH_CONFIG, vardefs, CFG_NVARS);
 	if (cfg == NULL)
 		errx(EXIT_FAILURE, "%s", dsbcfg_strerror());
-	if (dsbcfg_getval(cfg, CFG_CFG_VERSION).integer < CFGVERSION) {
-		warnx("***********************************************"	\
-		      "******************");
-		warnx("WARNING");
-		warnx("");
-		warnx("Your dsbmd.conf seems to be outdated. Please " 	\
-		      "recreate it from");
-		warnx("dsbmd.conf.sample, or merge the files.");
-		warnx("");
-		warnx("***********************************************"	\
-		      "******************\n");
-	}
+	check_cfg_version(cfg);
+
 	/*
 	 * Generate UID list of allowed users.
 	 */
@@ -574,8 +564,7 @@ main(int argc, char *argv[])
 			if (!FD_ISSET(ep->cli->s, &rset))
 				continue;
 			csock = ep->cli->s;
-			if (serve_client(ep->cli) == -1 ||
-			    ep->cli->s == -1) {
+			if (serve_client(ep->cli) == -1 || ep->cli->s == -1) {
 				/* Disconnected */
 				FD_CLR(csock, &allset);
 				del_client(ep->cli);
