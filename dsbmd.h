@@ -27,6 +27,8 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <sys/queue.h>
+
 #include "fs.h"
 
 /*
@@ -73,6 +75,7 @@
 #define ERR_INVALID_ARGUMENT	((1 << 8) + 0x0f)
 #define ERR_STRING_TOO_LONG	((1 << 8) + 0x10)
 #define ERR_BAD_STRING		((1 << 8) + 0x11)
+#define ERR_TIMEOUT		((1 << 8) + 0x12)
 
 typedef enum DEV_TYPES {
 	ST_HDD,		ST_MMC,
@@ -134,7 +137,13 @@ typedef struct sdev_s {
 	gid_t	      group;		  /* GID of device. */
 	const iface_t *iface;		  /* Interface type */
 	const storage_type_t *st;  	  /* Media/storage type */
+	pthread_mutex_t mtx;
 } sdev_t;
+
+struct devlist_s {
+	sdev_t *devp;
+	SLIST_ENTRY(devlist_s) next;
+};
 
 /*
  * Struct to manage clients.
@@ -150,5 +159,10 @@ typedef struct client_s {
 	size_t rd;			  /* # of bytes in buffer */
 	size_t slen;			  /* Len. of string in buffer. */
 } client_t;
+
+struct clilist_s {
+	client_t *cli;
+	SLIST_ENTRY(clilist_s) next;
+};
 
 #endif	/* !_DSBMD_H_ */

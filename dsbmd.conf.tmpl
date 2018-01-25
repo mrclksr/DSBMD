@@ -24,7 +24,7 @@
 #	In dsbmd.conf:
 #	ntfs_mount_cmd = /path/to/ntfs_mount_rw
 ##############################################################################
-cfgversion = 1000
+cfgversion = 1001
 
 # Define filesystem kernel modules to load at DSBMD startup.
 preload_kmods =  ufs, msdosfs, cd9660, ext2fs, fuse, geom_linux_lvm
@@ -118,13 +118,15 @@ ntfs_mount_cmd = "/usr/local/bin/ntfs-3g -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\
 mtpfs_mount_cmd = "/usr/local/bin/simple-mtpfs -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},allow_other\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 ptpfs_mount_cmd = "/usr/local/bin/gphotofs --port=${DSBMD_GPHOTO_USB_PORT} -o allow_other \"${DSBMD_MNTPT}\""
 exfat_mount_cmd = "/usr/local/sbin/mount.exfat -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
+hfsp_mount_cmd = "/usr/local/bin/hfsfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 
 # Commands for user mode mounting.
 ntfs_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" ntfs-3g ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 mtpfs_mount_cmd_usr = "/usr/local/bin/simple-mtpfs ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 ptpfs_mount_cmd_usr = "/usr/local/bin/gphotofs --port=${DSBMD_GPHOTO_USB_PORT} \"${DSBMD_MNTPT}\""
 exfat_mount_cmd_usr = "/usr/local/sbin/mount.exfat ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
-ext4_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" ext4fuse ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
+ext4_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" fuse-ext2 -o 'rw+' ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
+hfsp_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" hfsfuse ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 
 # allow_users - Comma separated list of users who are allowed to connect.
 # allow_users = jondoe, janedoe
