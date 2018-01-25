@@ -2633,7 +2633,6 @@ del_device(sdev_t *devp)
 
 	for (j = 0; j < NGLBLPRFX && devp->glabel[j] != NULL; j++)
 		free(devp->glabel[j]);
-	(void)pthread_mutex_destroy(&devp->mtx);
 	free(devp);
 	SLIST_REMOVE(&devs, ep, devlist_s, next);
 	free(ep);
