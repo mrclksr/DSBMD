@@ -24,7 +24,7 @@ FEATURES
          can be defined.
 
      •   Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2/3, Ext4,
-         and exFAT.
+         HFS+, and exFAT.
 
      •   Mounts and unmounts not initiated though DSBMD are detected, and
          necessary action are taken.
@@ -66,9 +66,10 @@ SETUP
            dsbmd_enable="YES"
 
      Depending on your needs, install the FreeBSD ports fusefs-exfat,
-     fusefs-gphotofs, fusefs-ntfs, and fusefs-simple-mtpfs.  DSBMD comes with
-     predefined commands in dsbmd.conf that use these ports to mount the
-     corresponding filesystems.
+     fusefs-gphotofs, fusefs-ntfs, fusefs-ext2, and fusefs-simple-mtpfs.  For
+     mounting HFS+ volumes, install hfsfuse (https://github.com/0x09/hfsfuse).
+     DSBMD comes with predefined commands in dsbmd.conf that use these ports
+     to mount the corresponding filesystems.
 
      For further configuration, see dsbmd.conf.
 
@@ -270,4 +271,4 @@ DSBMD PROTOCOL SPECIFICATION
      used and ‘free’ is the number of free bytes. If the device/media is not
      mounted, ‘free’ and ‘used’ are 0.
 
-                               December 15, 2017
+                               January 26, 2018
