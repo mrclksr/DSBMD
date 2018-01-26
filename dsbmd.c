@@ -527,7 +527,9 @@ main(int argc, char *argv[])
 			/* New devd event. */
 			if ((ev = read_devd_event(dsock, &error)) != NULL)
 				process_devd_event(ev);
-			if (error == SOCK_ERR_CONN_CLOSED) {
+			else if (error == SOCK_ERR_IO_ERROR)
+				die("read_devd_event()");
+			else if (error == SOCK_ERR_CONN_CLOSED) {
 				/* Lost connection to devd. */
 				FD_CLR(dsock, &allset);
 				(void)close(dsock);
@@ -540,9 +542,8 @@ main(int argc, char *argv[])
 				}
 				maxfd = maxfd > dsock ? maxfd : dsock;
 				FD_SET(dsock, &allset);
-			} else if (error == SOCK_ERR_IO_ERROR)
-				die("read_devd_event()");
-		} 
+			}
+		}
 		if (FD_ISSET(lsock, &rset)) {
 			/* A client has connected. */
 			if ((cli = process_connreq(lsock)) != NULL) {
@@ -963,6 +964,7 @@ add_to_pollqueue(sdev_t *devp)
 	SLIST_INSERT_HEAD(&pollq, ep, next);
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
+
 static void
 del_from_pollqueue(sdev_t *devp)
 {
@@ -2770,8 +2772,8 @@ dev_from_gptid(const char *gptid)
 	struct gmesh	 mesh;
 	struct ggeom	 *gp;
 	struct gclass	 *cp;
+	struct gconfig	 *conf;
 	struct gprovider *pp;
-	struct gconfig *conf;
 
 	if (strncmp(gptid, "gptid/", 6) == 0)
 		gptid += 6;
