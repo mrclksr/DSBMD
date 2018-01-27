@@ -138,8 +138,8 @@ static char	*get_lvm_dev(const char *);
 static char	*dev_from_gptid(const char *);
 static char	*ugen_to_gphoto_port(const char *);
 static void	*poll_thr(void *);
+static void	*devd_thr(void *);
 static void	lockpidfile(void);
-static void	process_devd_event(char *);
 static void	usage(void);
 static void	setuserenv(uid_t);
 static void	switcheids(uid_t, gid_t);
@@ -232,11 +232,17 @@ struct command_s {
 };
 
 /* 
- * Struct to represent a message sent from the poll thread
+ * Struct to represent a message sent from the threads
  * to the main thread.
  */
-struct pollmsg_s {
-	sdev_t *devp;
+struct ipcmsg_s {
+	char	dev[MNAMELEN];
+	sdev_t	*devp;
+	uint8_t	type;
+};
+
+enum {
+	MSGTYPE_ADD_DEVICE = 1, MSGTYPE_UPDATE_DEVICE, MSGTYPE_DEL_DEVICE
 };
 
 static bool	polling	      = false;	/* Do(n't) poll devices */
@@ -245,6 +251,7 @@ static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
 static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
 static dsbcfg_t	*cfg	      = NULL;
 static pthread_mutex_t pollqmtx;
+static pthread_mutex_t ipcsockmtx;
 static SLIST_HEAD(, devlist_s) devs;	/* List of mountable devs. */
 static SLIST_HEAD(, clilist_s) clis;	/* List of connected clients. */
 static SLIST_HEAD(, devlist_s) pollq;	/* Poll queue */
@@ -252,13 +259,14 @@ static SLIST_HEAD(, devlist_s) pollq;	/* Poll queue */
 int
 main(int argc, char *argv[])
 {
-	int	       i, error, sflags, maxfd, ch, dsock, lsock;
-	int	       csock, mntchkiv, pollsv[2];
+	int	       i, sflags, maxfd, ch, lsock;
+	int	       csock, mntchkiv, ipcsv[2];
 	DIR	       *dirp, *dirp2;
 	bool	       fflag;
 	FILE	       *fp;
-	char	       lvmpath[512], *ev, **v;
+	char	       lvmpath[512], **v;
 	time_t	       mntchktime;
+	sdev_t	       *devp;
 	fd_set	       allset, rset;
 	client_t       *cli;
 	pthread_t      tid;
@@ -267,7 +275,7 @@ main(int argc, char *argv[])
 	struct passwd  *pw;
 	struct dirent  *dp, *dp2;
 	struct timeval tv;
-	struct pollmsg_s pmsg;
+	struct ipcmsg_s msg;
 	struct sockaddr_un s_addr;
 	struct clilist_s *ep, *ep_tmp;
 
@@ -462,9 +470,6 @@ main(int argc, char *argv[])
 	(void)closedir(dirp);
 	if (chdir("/") == -1)
 		die("chdir(/)");
-	/* Connect to devd. */
-	if ((dsock = devd_connect()) == -1)
-		die("Couldn't connect to %s", PATH_DEVD_SOCKET);
 
 	/* Open the listening socket for the clients. */
         (void)unlink(PATH_DSBMD_SOCKET);
@@ -489,23 +494,25 @@ main(int argc, char *argv[])
 	sflags |= O_NONBLOCK;
 	if (fcntl(lsock, F_SETFL, sflags) == -1)
 		die("fcntl()");
-	FD_ZERO(&allset);
-	FD_SET(lsock, &allset); FD_SET(dsock, &allset);
+	if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, ipcsv) == -1)
+		die("socketpair()");
+	maxfd = lsock > ipcsv[0] ? lsock : ipcsv[0];
 
-	maxfd = dsock > lsock ? dsock : lsock;
+	FD_ZERO(&allset);
+	FD_SET(lsock, &allset); FD_SET(ipcsv[0], &allset);
+
+	(void)pthread_mutex_init(&ipcsockmtx, NULL);
 
 	if (polling) {
-		if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, pollsv) == -1)
-			die("socketpair()");
 		polling = true;
-		maxfd = maxfd > pollsv[0] ? maxfd : pollsv[0];
-		FD_SET(pollsv[0], &allset);
-
 		(void)pthread_mutex_init(&pollqmtx, NULL);
-		if (pthread_create(&tid, NULL, poll_thr, &pollsv[1]) != 0)
+		if (pthread_create(&tid, NULL, poll_thr, &ipcsv[1]) != 0)
 			die("pthread_create()");
 		(void)pthread_detach(tid);
 	}
+	if (pthread_create(&tid, NULL, devd_thr, &ipcsv[1]) != 0)
+		die("pthread_create()");
+	(void)pthread_detach(tid);
 
 	/* Main loop. */
 	for (mntchktime = 0;;) {
@@ -523,27 +530,6 @@ main(int argc, char *argv[])
 			mntchktime = poll_mntbl();
 			continue;
 		}
-		if (FD_ISSET(dsock, &rset)) {
-			/* New devd event. */
-			if ((ev = read_devd_event(dsock, &error)) != NULL)
-				process_devd_event(ev);
-			else if (error == SOCK_ERR_IO_ERROR)
-				die("read_devd_event()");
-			else if (error == SOCK_ERR_CONN_CLOSED) {
-				/* Lost connection to devd. */
-				FD_CLR(dsock, &allset);
-				(void)close(dsock);
-				logprintx("Lost connection to devd. " \
-				    "Reconnecting ...");
-				if ((dsock = devd_connect()) == -1) {
-					logprintx("Connecting to devd " \
-					    "failed. Giving up.");
-					exit(EXIT_FAILURE);
-				}
-				maxfd = maxfd > dsock ? maxfd : dsock;
-				FD_SET(dsock, &allset);
-			}
-		}
 		if (FD_ISSET(lsock, &rset)) {
 			/* A client has connected. */
 			if ((cli = process_connreq(lsock)) != NULL) {
@@ -551,15 +537,30 @@ main(int argc, char *argv[])
 				FD_SET(cli->s, &allset);
 			}
 		}
-		if (polling && FD_ISSET(pollsv[0], &rset)) {
+		if (FD_ISSET(ipcsv[0], &rset)) {
 			/* Polled device changed. */
-			if (recv(pollsv[0], &pmsg, sizeof(pmsg),
+			if (recv(ipcsv[0], &msg, sizeof(msg),
 			    MSG_WAITALL) == -1) {
 				if (errno == EINTR)
 					continue;
 				die("recv()");
 			}
-			update_device(pmsg.devp);
+			switch (msg.type) {
+			case MSGTYPE_ADD_DEVICE:
+				add_device(msg.dev);
+				break;
+			case MSGTYPE_DEL_DEVICE:
+				if ((devp = lookup_dev(msg.dev)) == NULL)
+					break;
+				/*
+				 * Do not delete cd devices.
+				 */
+				if (devp->iface->type != IF_TYPE_CD)
+					del_device(devp);
+				break;
+			case MSGTYPE_UPDATE_DEVICE:
+				update_device(msg.devp);
+			}
 		}
 		SLIST_FOREACH_SAFE(ep, &clis, next, ep_tmp) {
 			if (!FD_ISSET(ep->cli->s, &rset))
@@ -839,7 +840,7 @@ read_devd_event(int s, int *error)
 	msg.msg_iovlen = 1;
 
 	for (n = rd = *error = 0;;) {
-		msg.msg_name = msg.msg_control = NULL;
+		msg.msg_name    = msg.msg_control = NULL;
 		msg.msg_namelen = msg.msg_controllen = 0;
 
 		if ((n = recvmsg(s, &msg, 0)) == (ssize_t)-1) {
@@ -869,29 +870,6 @@ read_devd_event(int s, int *error)
 	return (NULL);
 }
 
-static void
-process_devd_event(char *ev)
-{
-	sdev_t *devp;
-
-	if (ev[0] != '!')
-		return;
-	parse_devd_event(ev + 1);
-	if (strcmp(devdevent.system, "DEVFS") != 0 ||
-	    strcmp(devdevent.subsystem, "CDEV") != 0)
-		return;
-	if (strcmp(devdevent.type, "CREATE") == 0) {
-		add_device(devdevent.cdev);
-	} else if (strcmp(devdevent.type, "DESTROY") == 0) {
-		if ((devp = lookup_dev(devdevent.cdev)) == NULL)
-			return;
-		/*
-		 * Do not delete cd devices.
-		 */
-		if (devp->iface->type != IF_TYPE_CD)
-			del_device(devp);
-	}
-}
 
 static void
 parse_devd_event(char *str)
@@ -916,25 +894,77 @@ parse_devd_event(char *str)
 	}
 }
 
-
 static void *
 poll_thr(void *socket)
 {
 	int	s, polliv;
 	sdev_t *devp;
-	struct pollmsg_s msg;
+	struct ipcmsg_s msg;
 
  	s = *(int *)socket;
 	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
 	for (;; sleep(polliv)) {
 		(void)pthread_mutex_lock(&pollqmtx);
 		while ((devp = media_changed()) != NULL) {
+			msg.type = MSGTYPE_UPDATE_DEVICE;
 			msg.devp = devp;
+			(void)pthread_mutex_lock(&ipcsockmtx);
 			(void)send(s, &msg, sizeof(msg), MSG_EOR);
+			(void)pthread_mutex_unlock(&ipcsockmtx);
 		}
 		(void)pthread_mutex_unlock(&pollqmtx);
 	}
 	return (NULL);
+}
+
+static void *
+devd_thr(void *ipcsock)
+{
+	int    ipc, devd, error;
+	char   *ev;
+	fd_set rset, _rset;
+	struct ipcmsg_s msg;
+
+	ipc = *(int *)ipcsock;
+
+	if ((devd = devd_connect()) == -1)
+		die("Couldn't connect to %s", PATH_DEVD_SOCKET);
+	FD_ZERO(&_rset); FD_SET(devd, &_rset);
+	for (;;) {
+		rset = _rset;
+		if (select(devd + 1, &rset, NULL, NULL, NULL) == -1) {
+			if (errno == EINTR)
+				continue;
+			die("select()");
+		}
+		if ((ev = read_devd_event(devd, &error)) != NULL) {
+			if (ev[0] != '!')
+				continue;
+			parse_devd_event(ev + 1);
+			if (strcmp(devdevent.system, "DEVFS") != 0 ||
+			    strcmp(devdevent.subsystem, "CDEV") != 0)
+				continue;
+			if (strcmp(devdevent.type, "CREATE") == 0)
+				msg.type = MSGTYPE_ADD_DEVICE;
+			else if (strcmp(devdevent.type, "DESTROY") == 0)
+				msg.type = MSGTYPE_DEL_DEVICE;
+			else
+				continue;
+			(void)strncpy(msg.dev, devdevent.cdev,
+			    sizeof(msg.dev));
+			(void)pthread_mutex_lock(&ipcsockmtx);
+			(void)send(ipc, &msg, sizeof(msg), MSG_EOR);
+			(void)pthread_mutex_unlock(&ipcsockmtx);
+		} else  if (error == SOCK_ERR_CONN_CLOSED) {
+			/* Lost connection to devd. */
+			(void)close(devd);
+			logprintx("Lost connection to devd. Reconnecting ...");
+			if ((devd = devd_connect()) == -1)
+				die("Connecting to devd failed. Giving up.");
+			else if (error == SOCK_ERR_IO_ERROR)
+				die("read_devd_event()");
+		}
+	}
 }
 
 static void
