@@ -76,6 +76,8 @@ dsbcfg_vardef_t vardefs[] = {
 { "cfgversion",		   DSBCFG_VAR_INTEGER, CFG_CFG_VERSION,	    VAL(0)   }
 };
 
+const int nvardefs = sizeof(vardefs) / sizeof(dsbcfg_vardef_t);
+
 void
 check_cfg_version(dsbcfg_t *cfg)
 {
