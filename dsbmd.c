@@ -1016,24 +1016,25 @@ del_from_pollqueue(sdev_t *devp)
 static bool
 has_media(const char *dev)
 {
-	int    fd;
-	char   buf[16 * 1024];
-	bool   media;
-	off_t  size;
-	size_t blksz;
+	bool media;
+	union ccb *ccb;
+	struct cam_device *cd;
 
-	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
+	if ((cd = cam_open_device(dev, O_RDWR)) == NULL) {
+		logprint("cam_open_device(%s)", dev);
 		return (false);
-	size  = g_mediasize(fd);
-	blksz = g_sectorsize(fd);
-	errno = 0;
-	if ((int)size == -blksz || (int)size == -1)
+	}
+	ccb = cam_getccb(cd);
+	scsi_test_unit_ready(&ccb->csio, 0, NULL, MSG_ORDERED_Q_TAG, 0, 5000);
+	ccb->ccb_h.flags |= CAM_DEV_QFRZDIS;
+	if (cam_send_ccb(cd, ccb) == -1)
 		media = false;
-	else if (read(fd, buf, blksz > sizeof(buf) ? sizeof(buf) : blksz) == -1)
-		media = false;
-	else
+	else if ((ccb->ccb_h.status & CAM_STATUS_MASK) == CAM_REQ_CMP)
 		media = true;
-	(void)close(fd);
+	else
+		media = false;
+	cam_close_device(cd);
+	cam_freeccb(ccb);
 
 	return (media);
 }
@@ -2015,7 +2016,6 @@ get_optical_disk_type(const char *path)
 	char   *buf, *p;
 	bool   has_video_ts, has_mpeg2, has_mpegav, has_svcd;
 	bool   has_vcd, has_bdmv;
-	off_t  msz;
 	struct ioc_toc_header tochdr;
         struct iso_directory_record *dp;
 	struct iso_primary_descriptor *ip;
@@ -2024,32 +2024,15 @@ get_optical_disk_type(const char *path)
 	if (!has_media(path))
 		return (-1);
 	buf = NULL; type = ST_UNKNOWN;
-	if ((fd = open(path, O_RDONLY)) == -1) {
-		logprint("open()");
+	if ((fd = open(path, O_RDONLY)) == -1)
 		goto error;
-	}
-	/* Check whether the device has a valid media. */
-	if (ioctl(fd, DIOCGMEDIASIZE, &msz) == -1 || msz <= 0) {
-		logprint("mediasize");
-		goto done;
-	}
-	/*
-	 * Reopening  the device seems to be necessary after calling
-	 * DIOCGMEDIASIZE. Without reopening, CDIOREADTOCHEADER will
-	 * fail.
-	 */
-	(void)close(fd);
-	if ((fd = open(path, O_RDONLY)) == -1) {
-		logprint("open()");
-		goto error;
-	}
 	if ((pbs = g_sectorsize(fd)) == -1)
 		goto error;
 	if (ioctl(fd, CDIOREADTOCHEADER, &tochdr) == -1)
 		goto error;
 	tocent.track	      = tochdr.starting_track;
 	tocent.address_format = CD_LBA_FORMAT;
-	if (ioctl(fd, CDIOREADTOCENTRY, &tocent) == -1) 
+	if (ioctl(fd, CDIOREADTOCENTRY, &tocent) == -1)
 		goto error;
 	/*
 	 * If bit 2 of the 4 control bits in the subchannel Q is
@@ -2070,9 +2053,10 @@ get_optical_disk_type(const char *path)
 		goto error;
 	p  = buf + offset;
 	ip = (struct iso_primary_descriptor *)p;
-	if (strncmp(ip->id, ISO_STANDARD_ID, sizeof(ISO_STANDARD_ID) - 1))
+	if (strncmp(ip->id, ISO_STANDARD_ID, sizeof(ISO_STANDARD_ID) - 1)) {
 		/* No ISO9660 filesystem */
 		goto done;
+	}
 	type = ST_DATACD;
 	dp = (struct iso_directory_record *)ip->root_directory_record;
 
@@ -2132,6 +2116,8 @@ get_optical_disk_type(const char *path)
 		p	 += reclen;
 		len	 -= reclen;
 		dirtblsz -= reclen;
+		if (reclen <= 0)
+			break;
 	}
 done:	free(buf);
 	(void)close(fd);
@@ -2510,7 +2496,7 @@ add_device(const char *devname)
 		return (NULL);
 	/* Get full path to device */
 	path = devpath(devname);
-	if ((dev.has_media = has_media(path)))
+	if ((dev.has_media = has_media(get_diskname(path))))
 		dev.fs = getfs(path);
 	else
 		dev.fs = NULL;
@@ -2934,7 +2920,7 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 			 * Some USB devices must be accessed to make
 			 * them remove the associated CAM device.
 			 */
-			(void)has_media(devp->dev);
+			(void)has_media(get_diskname(devp->dev));
 			break;
 		} else
 			error = -1;
