@@ -23,6 +23,7 @@
  */
 
 #include <stdio.h>
+#include <assert.h>
 #include <sys/types.h>
 #include <camlib.h>
 #include <cam/cam_ccb.h>
@@ -290,6 +291,8 @@ main(int argc, char *argv[])
 			usage();
 		}
 	}
+	assert(CFG_NVARS == nvardefs);
+
 	cfg = dsbcfg_read(NULL, PATH_CONFIG, vardefs, CFG_NVARS);
 	if (cfg == NULL)
 		errx(EXIT_FAILURE, "%s", dsbcfg_strerror());
