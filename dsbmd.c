@@ -588,6 +588,22 @@ usage()
 static void
 cleanup(int unused)
 {
+	bool force, unmount_on_exit;
+	const char *val = dsbcfg_getval(cfg, CFG_UNMOUNT_ON_EXIT).string;
+	struct devlist_s *ep;
+
+	unmount_on_exit = force = false;
+	if (strcmp(val, "yes") == 0)
+		unmount_on_exit = true;
+	else if (strcmp(val, "force") == 0)
+		unmount_on_exit = force = true;
+	SLIST_FOREACH(ep, &devs, next) {
+		if (!ep->devp->mounted || !unmount_on_exit ||
+		    !ep->devp->dsbmd_mounted)
+			continue;
+		logprintx("Unmounting %s", ep->devp->mntpt);
+		(void)unmount(ep->devp->mntpt, force ? MNT_FORCE : 0);
+	}
 	logprintx("%s exited", PROGRAM);
 	cliprintbc(NULL, "S");
 	exit(EXIT_SUCCESS);
@@ -1020,6 +1036,7 @@ has_media(const char *dev)
 	union ccb *ccb;
 	struct cam_device *cd;
 
+	errno = 0;
 	if ((cd = cam_open_device(dev, O_RDWR)) == NULL) {
 		logprint("cam_open_device(%s)", dev);
 		return (false);
@@ -1045,15 +1062,19 @@ has_media(const char *dev)
 static sdev_t *
 media_changed()
 {
-	static struct devlist_s *ep = NULL;
+	static struct devlist_s *ep = NULL, *tmp = NULL;
 
-	SLIST_FOREACH_FROM(ep, &pollq, next) {
+	SLIST_FOREACH_FROM_SAFE(ep, &pollq, next, tmp) {
 		if (has_media(ep->devp->dev)) {
 			if (!ep->devp->has_media) {
 				/* Media was inserted */
 				ep->devp->has_media = true;
 				return (ep->devp);
 			}
+		} else if (errno == ENOENT) {
+			/* Check whether device was removed */
+			if (access(ep->devp->dev, F_OK) == -1)
+				del_device(ep->devp);
 		} else if (ep->devp->has_media) {
 			/* Media was removed */
 			ep->devp->has_media = false;
@@ -1062,7 +1083,6 @@ media_changed()
 	}
 	return (NULL);
 }
-
 
 static void
 update_device(sdev_t *devp)
@@ -1657,6 +1677,7 @@ mount_device(client_t *cli, sdev_t *devp)
 		if (getmntpt(devp) == NULL)
 			die("getmntpt()");
 		devp->mounted = true;
+		devp->dsbmd_mounted = true;
 		devp->cmd_mounted = false;
 		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s", devp->dev,
 		    devp->mntpt);
@@ -1717,6 +1738,7 @@ exec_mntcmd(client_t *cli, sdev_t *devp, char *mntpath)
 		devp->mntpt = mntpath;
 		devp->mounted = true;
 		devp->cmd_mounted = true;
+		devp->dsbmd_mounted = true;
 		cliprint(cli, "O:command=mount:dev=%s:mntpt=%s", devp->dev,
 		    devp->mntpt);
 		cliprintbc(cli, "M:dev=%s:mntpt=%s", devp->dev, devp->mntpt);
@@ -1795,11 +1817,10 @@ unmount_device(client_t *cli, sdev_t *devp, bool force, bool eject)
 	rmntpt(devp->mntpt);
 	free(devp->mntpt); devp->mntpt = NULL;
 	devp->mounted = false;
-	(void)change_owner(devp, devp->owner);
 	if (devp->iface->type == IF_TYPE_FUSE)
 		del_device(devp);
-	sleep(1);
-
+	else
+		(void)change_owner(devp, devp->owner);
 	return (0);
 }
 
@@ -2328,6 +2349,7 @@ add_ptp_device(const char *ugen)
 	devp->visible	  = true;
 	devp->mntpt	  = NULL;
 	devp->cmd_mounted = false;
+	devp->dsbmd_mounted = false;
 
 	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
 		die("malloc()");
@@ -2383,6 +2405,8 @@ add_mtp_device(const char *ugen)
 	devp->ejectable	  = false;
 	devp->visible	  = true;
 	devp->mntpt	  = NULL;
+	devp->cmd_mounted = false;
+	devp->dsbmd_mounted = false;
 
 	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
 		die("malloc()");
@@ -2431,6 +2455,8 @@ add_fuse_device(const char *mntpt)
 	devp->visible	  = true;
 	devp->ejectable	  = false;
 	devp->cmd_mounted = false;
+	devp->dsbmd_mounted = false;
+
 	if ((devp->mntpt = strdup(mntpt)) == NULL)
 		die("strdup()");
 	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
@@ -2549,6 +2575,7 @@ add_device(const char *devname)
 	devp->visible	  = false;
 	devp->ejectable   = dev.ejectable;
 	devp->cmd_mounted = false;
+	devp->dsbmd_mounted = false;
 
 	/* Set max. CD/DVD reading speed. */
 	if (devp->iface->type == IF_TYPE_CD) {
@@ -3355,7 +3382,6 @@ cmd_unmount(client_t *cli, char **argv)
 	(void)unmount_device(cli, devp, force, false);
 }
 
-
 static void
 cmd_quit(client_t *cli, char **argv)
 {
@@ -3502,11 +3528,13 @@ check_mntbl(struct statfs *sb, int nsb)
 				if (devp->mntpt == NULL)
 					die("strdup()");
 				devp->mounted = true;
+				devp->dsbmd_mounted = false;
 				cliprintbc(NULL, "M:dev=%s:mntpt=%s",
 				    devp->dev, devp->mntpt);
 			} else if (devp->mounted &&
 			    strcmp(devp->mntpt, mntpt) != 0) {
 				/* Remounted */
+				devp->dsbmd_mounted = false;
 				rmntpt(devp->mntpt);
 				cliprintbc(NULL, "U:dev=%s:mntpt=%s",
 				    devp->dev, devp->mntpt);
