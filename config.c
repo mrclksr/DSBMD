@@ -54,6 +54,7 @@ dsbcfg_vardef_t vardefs[] = {
 { "cd9660_opts",           DSBCFG_VAR_STRING,  CFG_CD9660_OPTS	     	     },
 { "msdosfs_opts",          DSBCFG_VAR_STRING,  CFG_MSDOSFS_OPTS     	     },
 { "msdosfs_locale",        DSBCFG_VAR_STRING,  CFG_MSDOSFS_LOCALE   	     },
+{ "hfsp_opts",             DSBCFG_VAR_STRING,  CFG_HFSP_OPTS	     	     },
 { "ntfs_opts",             DSBCFG_VAR_STRING,  CFG_NTFS_OPTS	     	     },
 { "ufs_opts",	           DSBCFG_VAR_STRING,  CFG_UFS_OPTS	     	     },
 { "ext_opts",              DSBCFG_VAR_STRING,  CFG_EXT_OPTS	     	     },
@@ -78,6 +79,7 @@ dsbcfg_vardef_t vardefs[] = {
 void
 check_cfg_version(dsbcfg_t *cfg)
 {
+
 	if (dsbcfg_getval(cfg, CFG_CFG_VERSION).integer < CFGVERSION) {
 		warnx("***********************************************"	\
 		      "******************");
