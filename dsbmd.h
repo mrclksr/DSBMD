@@ -112,6 +112,7 @@ typedef struct sdev_s {
 	int	      speed;
 	bool	      mounted;
 	bool	      cmd_mounted;	  /* Mounted using ext. cmd */
+	bool	      dsbmd_mounted;	  /* Mounted through dsbmd. */
 	bool	      has_media;
 	bool	      polling;		  /* May be polled. */
 	bool	      visible;		  /* Visible to client? */
