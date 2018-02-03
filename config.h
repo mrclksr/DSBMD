@@ -45,6 +45,6 @@ enum {
 };
 
 extern dsbcfg_vardef_t vardefs[];
-
+extern const int nvardefs;
 extern void check_cfg_version(dsbcfg_t *);
 
