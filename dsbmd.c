@@ -2077,7 +2077,8 @@ get_optical_disk_type(const char *path)
 		goto error;
 	p  = buf + offset;
 	ip = (struct iso_primary_descriptor *)p;
-	if (strncmp(ip->id, ISO_STANDARD_ID, sizeof(ISO_STANDARD_ID) - 1)) {
+	if (strncmp(ip->id, ISO_STANDARD_ID, sizeof(ISO_STANDARD_ID) - 1) &&
+	    strncmp(ip->id, ISO_SIERRA_ID, sizeof(ISO_SIERRA_ID) -1)) {
 		/* No ISO9660 filesystem */
 		goto done;
 	}
