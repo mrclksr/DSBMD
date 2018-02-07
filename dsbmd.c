@@ -149,7 +149,6 @@ static void	rmntpt(const char *);
 static void	cleanup(int);
 static void	del_device(sdev_t *);
 static void	del_client(client_t *);
-static void	clisock_close(client_t *);
 static void	update_device(sdev_t *);
 static void	parse_devd_event(char *);
 static void	free_iovec(struct iovec *);
@@ -572,6 +571,7 @@ main(int argc, char *argv[])
 			if (serve_client(ep->cli) == -1 || ep->cli->s == -1) {
 				/* Disconnected */
 				FD_CLR(csock, &allset);
+				(void)close(csock);
 				del_client(ep->cli);
 			}
 		}
@@ -3055,14 +3055,6 @@ uconnect(const char *path)
 	return (s);
 }
 
-static void
-clisock_close(client_t *cli)
-{
-	if (cli->s > -1)
-		(void)close(cli->s);
-	cli->s = -1;
-}
-
 static int
 send_string(int socket, const char *str)
 {
@@ -3092,14 +3084,13 @@ cliprint(client_t *cli, const char *fmt, ...)
 	int	saved_errno;
 	va_list	ap;
 
+	if (cli->s == -1)
+		return;
 	saved_errno = errno;
 	va_start(ap, fmt);
 	(void)vsnprintf(cli->msg, sizeof(cli->msg) - 2, fmt, ap);
 	(void)strcat(cli->msg, "\n");
-	if (send_string(cli->s, cli->msg) == -1 && errno == EPIPE) {
-		/* Client disconnected */
-		clisock_close(cli);
-	}
+	(void)send_string(cli->s, cli->msg);
 	errno = saved_errno;
 }
 
@@ -3114,15 +3105,13 @@ cliprintbc(client_t *exclude, const char *fmt, ...)
 	SLIST_FOREACH(ep, &clis, next) {
 		if (exclude != NULL && exclude->id == ep->cli->id)
 			continue;
+		if (ep->cli->s == -1)
+			continue;
 		va_start(ap, fmt);
 		(void)vsnprintf(ep->cli->msg, sizeof(ep->cli->msg) - 2,
 		    fmt, ap);
 		(void)strcat(ep->cli->msg, "\n");
-		if (send_string(ep->cli->s, ep->cli->msg) == -1 &&
-		    errno == EPIPE) {
-			/* Client disconnected */
-			clisock_close(ep->cli);
-		}
+		(void)send_string(ep->cli->s, ep->cli->msg);
 	}
 	errno = saved_errno;
 }
@@ -3206,8 +3195,6 @@ serve_client(client_t *cli)
 	if (error == SOCK_ERR_IO_ERROR)
 		logprint("client_readln() error. Closing client connection");
 	/* Client disconnected or error. */
-	clisock_close(cli);
-
 	return (-1);
 }
 
@@ -3389,7 +3376,7 @@ cmd_unmount(client_t *cli, char **argv)
 static void
 cmd_quit(client_t *cli, char **argv)
 {
-	clisock_close(cli);
+	cli->s = -1;
 }
 
 static time_t
