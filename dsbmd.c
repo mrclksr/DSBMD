@@ -2985,7 +2985,7 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 			 * Some USB devices must be accessed to make
 			 * them remove the associated CAM device.
 			 */
-			(void)scsi_has_media(get_diskname(devp->dev));
+			(void)scsi_has_media(disk);
 			break;
 		} else
 			error = -1;
