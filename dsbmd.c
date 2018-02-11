@@ -124,6 +124,7 @@ static int	serve_client(client_t *);
 static bool	match_part_dev(const char *, size_t);
 static bool	match_glabel(sdev_t *, const char *);
 static bool	has_media(const char *);
+static bool	scsi_has_media(const char *);
 static bool	is_parted(const char *);
 static bool	is_mountable(const char *);
 static bool	is_mntpt(const char *);
@@ -1009,7 +1010,6 @@ add_to_pollqueue(sdev_t *devp)
 	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
 		die("malloc()");
 	ep->devp = devp;
-	ep->devp->has_media = has_media(devp->dev);
 	SLIST_INSERT_HEAD(&pollq, ep, next);
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
@@ -1034,6 +1034,28 @@ del_from_pollqueue(sdev_t *devp)
 
 static bool
 has_media(const char *dev)
+{
+	int    fd;
+	bool   media;
+	off_t  size;
+	size_t blksz;
+
+	if ((fd = open(dev, O_RDONLY | O_NONBLOCK)) == -1)
+		return (false);
+	size  = g_mediasize(fd);
+	blksz = g_sectorsize(fd);
+	errno = 0;
+	if ((int)size == -blksz || (int)size == -1)
+		media = false;
+	else
+		media = true;
+	(void)close(fd);
+
+	return (media);
+}
+
+static bool
+scsi_has_media(const char *dev)
 {
 	bool media;
 	union ccb *ccb;
@@ -1065,10 +1087,19 @@ has_media(const char *dev)
 static sdev_t *
 media_changed()
 {
+	bool media;
 	static struct devlist_s *ep = NULL, *tmp = NULL;
 
 	SLIST_FOREACH_FROM_SAFE(ep, &pollq, next, tmp) {
-		if (has_media(ep->devp->dev)) {
+		switch (ep->devp->iface->type) {
+		case IF_TYPE_DA:
+		case IF_TYPE_CD:
+			media = scsi_has_media(ep->devp->dev);
+			break;
+		default:
+			media = has_media(ep->devp->dev);
+		}
+		if (media) {
 			if (!ep->devp->has_media) {
 				/* Media was inserted */
 				ep->devp->has_media = true;
@@ -2045,7 +2076,7 @@ get_optical_disk_type(const char *path)
 	struct iso_primary_descriptor *ip;
 	struct ioc_read_toc_single_entry tocent;
 
-	if (!has_media(path))
+	if (!scsi_has_media(path))
 		return (-1);
 	buf = NULL; type = ST_UNKNOWN;
 	if ((fd = open(path, O_RDONLY)) == -1)
@@ -2226,7 +2257,7 @@ get_storage_type(const char *devname)
 		return NULL;
 	switch (iface->type) {
 	case IF_TYPE_CD:
-		if (has_media(devname)) {
+		if (scsi_has_media(devname)) {
 			if ((type = get_optical_disk_type(devname)) == -1)
 				return (NULL);
 			if (type == ST_UNKNOWN)
@@ -2526,7 +2557,11 @@ add_device(const char *devname)
 		return (NULL);
 	/* Get full path to device */
 	path = devpath(devname);
-	if ((dev.has_media = has_media(get_diskname(path))))
+	if (dev.iface->type == IF_TYPE_CD || dev.iface->type == IF_TYPE_DA)
+		dev.has_media = scsi_has_media(get_diskname(path));
+	else
+		dev.has_media = has_media(path);
+	if (dev.has_media)
 		dev.fs = getfs(path);
 	else
 		dev.fs = NULL;
@@ -2951,7 +2986,7 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 			 * Some USB devices must be accessed to make
 			 * them remove the associated CAM device.
 			 */
-			(void)has_media(get_diskname(devp->dev));
+			(void)scsi_has_media(get_diskname(devp->dev));
 			break;
 		} else
 			error = -1;
