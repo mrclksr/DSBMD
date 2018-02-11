@@ -2287,7 +2287,7 @@ get_storage_type(const char *devname)
 static int
 get_da_storage_type(const char *devname)
 {
-	int    u, type;
+	int    type;
 	char   var[sizeof("dev.umass.##.%location") + 1], buf[512], *disk, *p;
 	size_t sz;
 	struct cam_device *cd;
@@ -2301,11 +2301,9 @@ get_da_storage_type(const char *devname)
 		cam_close_device(cd);
 		return (ST_HDD);
 	}
-	u = strtol(cd->sim_name + 9, NULL, 10);
 	cam_close_device(cd);
-
-	(void)snprintf(var, sizeof(var) - 1, "dev.umass.%d.%%location", u);
-
+	(void)snprintf(var, sizeof(var) - 1, "dev.umass.%d.%%location",
+	    cd->sim_unit_number);
 	sz = sizeof(buf) - 1;
 	if (sysctlbyname(var, buf, &sz, NULL, 0) == -1) {
 		logprint("sysctlbyname(%s)", var);
@@ -2531,9 +2529,10 @@ add_device(const char *devname)
 			return (add_mtp_device(devname));
 		else if (dev.st->type == ST_PTP)
 			return (add_ptp_device(devname));
-		else if (is_parted(devname) && !match_part_dev(devname, 0))
+		else if (is_parted(devname) && !match_part_dev(devname, 0)) {
 			/* Only add slices of partitioned disks. */
 			return (NULL);
+		}
 	} else if (dev.iface->type != IF_TYPE_CD)
 		return (NULL);
 	if (dev.iface->type == IF_TYPE_CD) {
