@@ -1067,7 +1067,8 @@ scsi_has_media(const char *dev)
 		return (false);
 	}
 	ccb = cam_getccb(cd);
-	scsi_test_unit_ready(&ccb->csio, 0, NULL, MSG_ORDERED_Q_TAG, 0, 5000);
+	scsi_test_unit_ready(&ccb->csio, 0, NULL, MSG_ORDERED_Q_TAG,
+	    SSD_FULL_SIZE, 5000);
 	ccb->ccb_h.flags |= CAM_DEV_QFRZDIS;
 	if (cam_send_ccb(cd, ccb) == -1)
 		media = false;
