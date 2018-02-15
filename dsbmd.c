@@ -247,10 +247,10 @@ enum {
 };
 
 static bool	polling	      = false;	/* Do(n't) poll devices */
-static FILE	*lockfp	      = NULL;	/* Filepointer for lock file. */
 static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
 static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
 static dsbcfg_t	*cfg	      = NULL;
+static struct pidfh *pfh      = NULL;	/* PID file handle. */
 static pthread_mutex_t pollqmtx;
 static pthread_mutex_t ipcsockmtx;
 static SLIST_HEAD(, devlist_s) devs;	/* List of mountable devs. */
@@ -416,7 +416,7 @@ main(int argc, char *argv[])
 		lockpidfile();
 		/* Close all files except for the lock file. */
 		for (i = 0; i < 16; i++) {
-			if (fileno(lockfp) != i)
+			if (pidfile_fileno(pfh) != i)
 				(void)close(i);
 		}
 		/* Redirect error messages to logfile. */
@@ -608,35 +608,23 @@ cleanup(int unused)
 		logprintx("Unmounting %s", ep->devp->mntpt);
 		(void)unmount(ep->devp->mntpt, force ? MNT_FORCE : 0);
 	}
-	logprintx("%s exited", PROGRAM);
 	cliprintbc(NULL, "S");
+	logprintx("%s exited", PROGRAM);
+	pidfile_remove(pfh);
 	exit(EXIT_SUCCESS);
 }
 
 static void
 lockpidfile()
 {
+
 	/* Check if deamon is already running. */
-	if ((lockfp = fopen(PATH_PID_FILE, "r+")) == NULL) {
-		if (errno != ENOENT)
-			die("fopen(%s)", PATH_PID_FILE);
-		/* Not running - Create the PID/lock file. */
-		if ((lockfp = fopen(PATH_PID_FILE, "w")) == NULL) {
-			die("couldn't create pid file %s",
-			    PATH_PID_FILE);
-		}
-	}
-	if (lockf(fileno(lockfp), F_TLOCK, 0) == -1) {
-		if (errno == EAGAIN) {
-			/* Daemon already running. */
+	if ((pfh = pidfile_open(PATH_PID_FILE, 0600, NULL)) == NULL) {
+		if (errno == EEXIST)
 			errx(EXIT_FAILURE, "%s is already running.", PROGRAM);
-		} else
-			die("flock()");
+		err(EXIT_FAILURE, "Failed to create PID file.");
 	}
-	/* Write our PID to the PID/lock file. */
-	(void)fprintf(lockfp, "%d", getpid());
-	(void)fflush(lockfp);
-	(void)ftruncate(fileno(lockfp), ftell(lockfp));
+	pidfile_write(pfh);
 }
 
 static sdev_t *
