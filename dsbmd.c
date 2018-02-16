@@ -2962,7 +2962,7 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 		return (error);
 	}
 	scsi_start_stop(&ccb->csio, 1, NULL, MSG_ORDERED_Q_TAG,
-	    0, 1, 0, 0, 100000);
+	    0, 1, 0, SSD_FULL_SIZE, 100000);
 	for (i = 0; i < 3; i++) {
 		if (cam_send_ccb(cd, ccb) == -1) {
 			error = errno;
