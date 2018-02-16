@@ -399,20 +399,8 @@ main(int argc, char *argv[])
 
 	/* Ready to deamonize. */
 	if (!fflag) {
-		for (i = 0; i < 2; i++) {
-			switch (fork()) {
-			case -1:
-				err(EXIT_FAILURE, "fork()");
-			case  0:
-				break;
-			default:
-				exit(EXIT_SUCCESS);
-			}
-			if (i == 0) {
-				(void)setsid();
-				(void)signal(SIGHUP, SIG_IGN);
-			}
-		}
+		if (daemon(0, 1) == -1)
+			err(EXIT_FAILURE, "Failed to daemonize");
 		lockpidfile();
 		/* Close all files except for the lock file. */
 		for (i = 0; i < 16; i++) {
