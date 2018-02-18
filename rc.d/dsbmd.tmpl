@@ -17,9 +17,15 @@ name=dsbmd
 command=@PATH_PROGRAM@
 rcvar=dsbmd_enable
 pidfile=@PATH_PIDFILE@
+stop_cmd=dsbmd_stop
 
 load_rc_config $name
 
 : ${dsbmd_enable:="NO"}
+
+dsbmd_stop()
+{
+	kill `cat $pidfile`
+}
 
 run_rc_command "$1"
