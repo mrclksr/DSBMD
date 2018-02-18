@@ -1046,12 +1046,16 @@ scsi_has_media(const char *dev)
 	scsi_test_unit_ready(&ccb->csio, 0, NULL, MSG_ORDERED_Q_TAG,
 	    SSD_FULL_SIZE, 5000);
 	ccb->ccb_h.flags |= CAM_DEV_QFRZDIS;
-	if (cam_send_ccb(cd, ccb) == -1)
+	if (cam_send_ccb(cd, ccb) == -1) {
+		warnx("cam_send_ccb(cd, ccb) == -1");
 		media = false;
-	else if ((ccb->ccb_h.status & CAM_STATUS_MASK) == CAM_REQ_CMP)
+	} else if ((ccb->ccb_h.status & CAM_STATUS_MASK) == CAM_REQ_CMP) {
+		warnx("%s has media", dev);
 		media = true;
-	else
+	} else {
+		warnx("%s has no media", dev);
 		media = false;
+	}
 	cam_close_device(cd);
 	cam_freeccb(ccb);
 
@@ -1071,23 +1075,28 @@ media_changed()
 		switch (ep->devp->iface->type) {
 		case IF_TYPE_DA:
 		case IF_TYPE_CD:
+			warnx("scsi_has_media()");
 			media = scsi_has_media(ep->devp->dev);
 			break;
 		default:
+			warnx("has_media()");
 			media = has_media(ep->devp->dev);
 		}
 		if (media) {
 			if (!ep->devp->has_media) {
 				/* Media was inserted */
+				warnx("%s: Media inserted", ep->devp->dev);
 				ep->devp->has_media = true;
 				return (ep->devp);
 			}
 		} else if (errno == ENOENT) {
+			warnx("errno == ENOENT. Removing %s", ep->devp->dev);
 			/* Check whether device was removed */
 			if (access(ep->devp->dev, F_OK) == -1)
 				del_device(ep->devp);
 		} else if (ep->devp->has_media) {
 			/* Media was removed */
+			warnx("%s: Media removed", ep->devp->dev);
 			ep->devp->has_media = false;
 			return (ep->devp);
 		}
