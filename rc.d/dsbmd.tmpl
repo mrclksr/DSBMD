@@ -25,7 +25,7 @@ load_rc_config $name
 
 dsbmd_stop()
 {
-	kill `cat $pidfile`
+	kill `cat ${pidfile}`
 }
 
 run_rc_command "$1"
