@@ -2239,8 +2239,11 @@ get_storage_type(const char *devname)
 	base = devbasename(devname);
 	iface = iface_from_name(base);
 
-	if (iface == NULL)
+	if (iface == NULL) {
+		warnx("iface == NULL");
 		return NULL;
+	}
+	warnx("iface->type == %d", iface->type);
 	switch (iface->type) {
 	case IF_TYPE_CD:
 		if (scsi_has_media(devname)) {
@@ -2280,10 +2283,13 @@ get_da_storage_type(const char *devname)
 
  	disk = get_diskname(devname);
 	if ((cd = cam_open_device(disk, O_RDWR)) == NULL) {
+		warnx("cam_open_device(%s)", disk);
 		logprint("cam_open_device(%s): %s", disk, cam_errbuf);
 		return (-1);
 	}
 	if (strncmp(cd->sim_name, "umass-sim", 9) != 0) {
+		warnx("sim_name == %s", cd->sim_name);
+		warnx("strncmp(cd->sim_name, \"umass-sim\", 9) != 0)");
 		cam_close_device(cd);
 		return (ST_HDD);
 	}
@@ -2292,18 +2298,24 @@ get_da_storage_type(const char *devname)
 	    cd->sim_unit_number);
 	sz = sizeof(buf) - 1;
 	if (sysctlbyname(var, buf, &sz, NULL, 0) == -1) {
+		warnx("sysctlbyname(%s) failed", var);
 		logprint("sysctlbyname(%s)", var);
 		return (-1);
 	}
+	warnx("buf == %s", buf);
 	for (p = buf; (p = strtok(p, "\t ")) != NULL; p = NULL) {
 		if (strncmp(p, "ugen=", 5) == 0)
 			break;
 	}
-	if (p == NULL)
+	if (p == NULL) {
+		warnx("p == NULL -> No ugen?");
 		return (-1);
+	}
 	p += 5;
-	if ((type = get_ugen_type(p)) == -1)
+	if ((type = get_ugen_type(p)) == -1) {
+		warnx("get_ugen_type(%s) failes", p);
 		return (-1);
+	}
 	return (type);
 }
 
@@ -2746,8 +2758,10 @@ get_ugen_type(const char *ugen)
 	struct LIBUSB20_DEVICE_DESC_DECODED    *ddesc;
 	struct LIBUSB20_INTERFACE_DESC_DECODED *idesc;
 
-	if (!get_ugen_bus_and_addr(ugen, &bus, &addr))
+	if (!get_ugen_bus_and_addr(ugen, &bus, &addr)) {
+		warnx("!get_ugen_bus_and_addr(ugen, &bus, &addr)");
 		return (-1);
+	}
 	pbe = libusb20_be_alloc_default();
 	for (type = -1, found = false, pdev = NULL;
 	    !found && (pdev = libusb20_be_device_foreach(pbe, pdev));) {
@@ -2763,7 +2777,10 @@ get_ugen_type(const char *ugen)
 				continue;
 			for (j = 0; j != cfg->num_interface && !found; j++) {
 				idesc = &(cfg->interface[j].desc);
+				warnx("idesc->bInterfaceClass == %d",
+				    idesc->bInterfaceClass);
 				if (idesc->bInterfaceClass == USB_CLASS_UMASS) {
+					warnx("idesc->bInterfaceClass == USB_CLASS_UMASS");
 					switch (idesc->bInterfaceSubClass) {
 					case USB_SUBCLASS_UMASS:
 						type = ST_USBDISK;
