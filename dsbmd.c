@@ -2498,14 +2498,18 @@ add_device(const char *devname)
 	struct stat sb;
 	struct devlist_s *ep;
 
+	warnx("dev_check_exists(%s)?", devname);
 	if (dev_check_exists(devname))
 		return (NULL);
+	warnx("Yes.");
 	devname = devbasename(devname);
-
+	warnx("devname == %s", devname);
 	if ((dev.iface = iface_from_name(devname)) == NULL)
 		return (NULL);
 	dev.polling = false;
+	warnx("get_storage_type(%s)", devname);
 	if ((dev.st = get_storage_type(devname)) != NULL) {
+		warnx("dev.st == %d", dev.st->type);
 		if (dev.st->type == ST_USB_CARDREADER) {
 			diskname = get_diskname(devname);
 			/* Only poll disk device, not slices. */
@@ -2536,25 +2540,38 @@ add_device(const char *devname)
 			die("strdup()");
 		if (devstat(realdev, &sb) == -1)
 			return (NULL);
-	} else if (devstat(devname, &sb) == -1)
+	} else if (devstat(devname, &sb) == -1) {
+		warnx("devstat(%s) == -1", devname);
 		return (NULL);
-	if (!is_mountable(devname))
+	}
+	if (!is_mountable(devname)) {
+		warnx("is_mountable(%s) == false", devname);
 		return (NULL);
+	}
 	/* Get full path to device */
 	path = devpath(devname);
-	if (dev.iface->type == IF_TYPE_CD || dev.iface->type == IF_TYPE_DA)
+	warnx("devpath(%s) == %s", devname, path);
+	if (dev.iface->type == IF_TYPE_CD || dev.iface->type == IF_TYPE_DA) {
 		dev.has_media = scsi_has_media(get_diskname(path));
-	else
+		warnx("scsi_has_media(get_diskname(%s)) == %d", path, dev.has_media);
+	} else {
 		dev.has_media = has_media(path);
-	if (dev.has_media)
+		warnx("has_media(%s) == %d", path, dev.has_media);
+	}
+	if (dev.has_media) {
 		dev.fs = getfs(path);
-	else
+		warnx("getfs(%s) == %s", path, dev.fs != NULL ? dev.fs->name : "");
+	} else {
+		warnx("dev.fs == NULL");
 		dev.fs = NULL;
+	}
 	if (dev.fs == NULL && dev.has_media) {
+		warnx("dev.fs == NULL && dev.has_media");
 		if (dev.st != NULL) {
 			if (dev.st->type != ST_USB_CARDREADER &&
 			    dev.iface->type != IF_TYPE_CD) {
 				/* HDD/USB stick with unknown filesystem. */
+				warnx("Unknown FS");
 				return (NULL);
 			}
 		}
@@ -2635,9 +2652,10 @@ add_device(const char *devname)
 	}
 	if (polling && devp->polling)
 		add_to_pollqueue(devp);
-	if (devp->has_media && devp->fs != NULL)
+	if (devp->has_media && devp->fs != NULL) {
+		warnx("visible(%s) == true", devp->dev);
 		devp->visible = true;
-	else if (devp->has_media && devp->st != NULL) {
+	} else if (devp->has_media && devp->st != NULL) {
 		switch (devp->st->type) {
 		case ST_CDDA:
 		case ST_SVCD:
@@ -2653,10 +2671,14 @@ add_device(const char *devname)
 	ep->devp = devp;
 	SLIST_INSERT_HEAD(&devs, ep, next);
 
-	if (devp->st == NULL)
+	if (devp->st == NULL) {
+		warnx("devp->st == NULL");
 		devp->visible = false;
+	}
 	if (devp->visible)
 		notifybc(devp, true);
+	else
+		warnx("%s is not visible", devp->dev);
 	return (devp);
 }
 
