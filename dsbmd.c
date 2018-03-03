@@ -2781,6 +2781,8 @@ get_ugen_type(const char *ugen)
 				    idesc->bInterfaceClass);
 				if (idesc->bInterfaceClass == USB_CLASS_UMASS) {
 					warnx("idesc->bInterfaceClass == USB_CLASS_UMASS");
+					warnx("idesc->bInterfaceSubClass == %d",
+					    idesc->bInterfaceSubClass);
 					switch (idesc->bInterfaceSubClass) {
 					case USB_SUBCLASS_UMASS:
 						type = ST_USBDISK;
