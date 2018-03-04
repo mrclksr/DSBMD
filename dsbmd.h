@@ -92,12 +92,12 @@ typedef enum IF_TYPES {
 
 typedef struct iface_s {
 	char	*re;
-#define RE_DA	"^da[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
+#define RE_DA	"^da[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?(\\.eli)?$"
 #define RE_UGEN "^ugen[0-9]{1,3}\\.[0-9]{1,2}$"
 #define RE_CD	"^cd[0-9]{1}[a-h]?$"
-#define RE_ADA	"^ada[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
-#define RE_MMC	"^mmcsd[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
-#define RE_MD	"^md[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?$"
+#define RE_ADA	"^ada[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?(\\.eli)?$"
+#define RE_MMC	"^mmcsd[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?(\\.eli)?$"
+#define RE_MD	"^md[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?(\\.eli)?$"
 #define RE_LVM	"^linux_lvm/[a-zA-Z0-9]+"
 #define RE_FUSE NULL
 #define RE_MTP  NULL
