@@ -83,11 +83,12 @@
 #define MNTDIRPERM	   (S_IRWXU | S_IXGRP | S_IRGRP | S_IXOTH | S_IROTH)
 #define NCOMMANDS	   (sizeof(commands) / sizeof(struct command_s))
 
-#define USB_CLASS_UMASS	   0x08
-#define USB_SUBCLASS_UMASS 0x06
-#define USB_SUBCLASS_MMC   0x02
-#define USB_CLASS_PTP	   0x06
 #define USB_SUBCLASS_PTP   0x01
+#define USB_SUBCLASS_MMC   0x02
+#define USB_SUBCLASS_SFF   0x05
+#define USB_SUBCLASS_UMASS 0x06
+#define USB_CLASS_PTP	   0x06
+#define USB_CLASS_UMASS	   0x08
 #define USB_PROTOCOL_PTP   0x01
 
 #define die(msg, ...) do { \
@@ -2735,6 +2736,7 @@ get_ugen_type(const char *ugen)
 				if (idesc->bInterfaceClass == USB_CLASS_UMASS) {
 					switch (idesc->bInterfaceSubClass) {
 					case USB_SUBCLASS_UMASS:
+					case USB_SUBCLASS_SFF:
 						type = ST_USBDISK;
 						found = true;
 						break;
