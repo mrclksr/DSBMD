@@ -25,7 +25,21 @@ load_rc_config $name
 
 dsbmd_stop()
 {
-	kill `cat ${pidfile}`
+	if [ -f ${pidfile} ]; then
+		echo "Stopping ${name}."
+		pid=$(cat ${pidfile})
+		n=0
+		while [ $n -lt 5 ]; do
+			kill ${pid}
+			pgrep ${name} || return 0
+			n=$(expr $n + 1)
+			sleep 1
+		done
+		kill -KILL ${pid}
+	else
+		echo "${name} is not running."
+		return 1
+	fi
 }
 
 run_rc_command "$1"
