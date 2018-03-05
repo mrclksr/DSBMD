@@ -30,12 +30,12 @@ dsbmd_stop()
 		pid=$(cat ${pidfile})
 		n=0
 		while [ $n -lt 5 ]; do
-			kill ${pid}
-			pgrep ${name} || return 0
+			kill ${pid} 2>/dev/null
+			pgrep -n ${name} || return 0
 			n=$(expr $n + 1)
 			sleep 1
 		done
-		kill -KILL ${pid}
+		kill -KILL ${pid} 2>/dev/null
 	else
 		echo "${name} is not running."
 		return 1
