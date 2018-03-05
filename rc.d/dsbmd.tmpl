@@ -32,7 +32,7 @@ dsbmd_stop()
 		while [ $n -lt 5 ]; do
 			kill ${pid} 2>/dev/null
 			pgrep -n ${name} || return 0
-			n=$(expr $n + 1)
+			n=$(($n + 1))
 			sleep 1
 		done
 		kill -KILL ${pid} 2>/dev/null
