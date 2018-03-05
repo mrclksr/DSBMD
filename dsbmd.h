@@ -42,8 +42,8 @@
 #define ENV_MNTPT		"DSBMD_MNTPT"
 #define ENV_USB_PORT		"DSBMD_GPHOTO_USB_PORT"
 
-#define NGLBLPRFX		5
-#define GLBLPRFX		{ NULL, "label", "ufs", "ufsid", "gptid" }
+#define NGLBLPRFX		6
+#define GLBLPRFX		{ NULL, "label", "ufs", "gpt", "ufsid", "gptid" }
 
 #define PATH_DEVD_SOCKET	"/var/run/devd.seqpacket.pipe"
 
