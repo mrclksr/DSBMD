@@ -371,7 +371,6 @@ getfs(const char *disk)
 			for (j = 0; j < nfstypes; j++) {
 				if (getfsd[i].type == fstype[j].id) {
 					(void)fclose(dev);
-					warnx("FS == %s", fstype[j].name);
 					return (&fstype[j]);
 				}
 			}
@@ -584,7 +583,8 @@ get_label(const char *dev, const char *fs)
 		label = get_geom_label(path, "msdosfs");
 	else if (strcmp(fs, "ufs") == 0) {
 		if ((label = get_geom_label(path, "label")) == NULL &&
-		    (label = get_geom_label(path, "ufs")) == NULL)
+		    (label = get_geom_label(path, "ufs")) == NULL &&
+		    (label = get_geom_label(path, "gpt")) == NULL)
 			label = get_geom_label(path, "ufsid");
 	} else if (strcmp(fs, "cd9660") == 0)
 		label = cd9660_get_volid(path);
@@ -592,7 +592,7 @@ get_label(const char *dev, const char *fs)
 		label = get_exfat_label(path);
 	else if (strcmp(fs, "ntfs") == 0)
 		label = get_geom_label(path, "ntfs");
-	else
+	else if ((label = get_geom_label(path, "gpt")) == NULL)
 		label = get_geom_label(path, NULL);
 	if (label != NULL) {
 		if ((p = strchr(label, '/')) != NULL)
