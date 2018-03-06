@@ -30,8 +30,7 @@ dsbmd_stop()
 		pid=$(cat ${pidfile})
 		n=0
 		while [ $n -lt 5 ]; do
-			kill ${pid} 2>/dev/null
-			pgrep -n ${name} || return 0
+			kill ${pid} 2>/dev/null || return 0
 			n=$(($n + 1))
 			sleep 1
 		done
