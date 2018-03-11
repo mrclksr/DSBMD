@@ -109,7 +109,8 @@ ext_opts = "rw,noatime"
 # ext_mount_cmd =
 # ext4_mount_cmd =
 # exfat_mount_cmd =
-# 
+# xfs_mount_cmd =
+
 # For user mode mounting:
 #
 # cd9660_mount_cmd_usr =
@@ -118,12 +119,15 @@ ext_opts = "rw,noatime"
 # ext_mount_cmd_usr =
 # ext4_mount_cmd_usr =
 # exfat_mount_cmd_usr =
+# xfs_mount_cmd_usr =
 
 ntfs_mount_cmd = "/usr/local/bin/ntfs-3g -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 mtpfs_mount_cmd = "/usr/local/bin/simple-mtpfs -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},allow_other\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 ptpfs_mount_cmd = "/usr/local/bin/gphotofs --port=${DSBMD_GPHOTO_USB_PORT} -o allow_other \"${DSBMD_MNTPT}\""
 exfat_mount_cmd = "/usr/local/sbin/mount.exfat -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 hfsp_mount_cmd = "/usr/local/bin/hfsfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
+xfs_mount_cmd = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},type=xfs\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
+
 
 # Commands for user mode mounting.
 ntfs_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" ntfs-3g ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
@@ -132,6 +136,7 @@ ptpfs_mount_cmd_usr = "/usr/local/bin/gphotofs --port=${DSBMD_GPHOTO_USB_PORT} \
 exfat_mount_cmd_usr = "/usr/local/sbin/mount.exfat ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 ext4_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" fuse-ext2 -o 'rw+' ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 hfsp_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" hfsfuse ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
+xfs_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o type=xfs ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 
 # allow_users - Comma separated list of users who are allowed to connect.
 # allow_users = jondoe, janedoe

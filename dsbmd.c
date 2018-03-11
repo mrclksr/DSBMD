@@ -389,6 +389,9 @@ main(int argc, char *argv[])
 		case PTPFS:
 			INITFS(i, PTPFS);
 			break;
+		case XFS:
+			INITFS(i, XFS);
+			break;
 		default:
 			/* Just to soothe clang. */
 			break;
@@ -1673,7 +1676,7 @@ mount_device(client_t *cli, sdev_t *devp)
 		}
 	}
 	errno = 0;
-
+	
 	if (devp->fs->mntcmd != NULL || (devp->fs->mntcmd_u != NULL &&
 	    dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set())) {
 		/*

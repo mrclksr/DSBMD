@@ -71,6 +71,10 @@
 #define EXFAT_MAX_LABEL_SIZE	     22
 #define EXFAT_MAX_ENTS		     19
 
+#define XFS_SB_OFFSET		     0x00
+#define XFS_MAGIC_OFFSET	     0x00
+#define XFS_MAGIC		     "XFSB"
+
 static bool is_fat(FILE *);
 static bool is_ntfs(FILE *);
 static bool is_exfat(FILE *);
@@ -79,6 +83,7 @@ static bool is_ext(FILE *);
 static bool is_ext4(FILE *dev);
 static bool is_iso9660(FILE *);
 static bool is_hfsp(FILE *);
+static bool is_xfs(FILE *);
 
 fs_t fstype[] = {
 	{ "ufs",      UFS,     NULL, NULL,    NULL },
@@ -91,7 +96,8 @@ fs_t fstype[] = {
 	{ "fuse",     FUSEFS,  NULL, NULL,    NULL },
 	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL },
 	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL },
-	{ "hfsp",     HFSP,    NULL, NULL,    NULL }
+	{ "hfsp",     HFSP,    NULL, NULL,    NULL },
+	{ "xfs",      XFS,     NULL, NULL,    NULL }
 };
 
 const int nfstypes = sizeof(fstype) / sizeof(fstype[0]);
@@ -107,7 +113,8 @@ static struct getfs_s {
 	{ is_ext4,     EXT4    },
 	{ is_ext,      EXT     },
 	{ is_iso9660,  CD9660  },
-	{ is_hfsp,     HFSP    }
+	{ is_hfsp,     HFSP    },
+	{ is_xfs,      XFS     }
 };
 
 static uint8_t *
@@ -352,6 +359,19 @@ is_iso9660(FILE *dev)
 	if ((p = (char *)bbread(dev, ISO9660_PD_OFFSET, 12)) == NULL)
 		return (false);
 	if (strncmp(&p[ISO9660_ID_OFFSET], ISO9660_ID, strlen(ISO9660_ID)) == 0)
+		return (true);
+	return (false);
+}
+
+static bool
+is_xfs(FILE *dev)
+{
+	uint8_t *p;
+
+	if ((p = bbread(dev, XFS_SB_OFFSET, DFLTSBSZ)) == NULL)
+		return (false);
+	if (strncmp((char *)&p[XFS_MAGIC_OFFSET], XFS_MAGIC,
+	    strlen(XFS_MAGIC)) == 0)
 		return (true);
 	return (false);
 }
