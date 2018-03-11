@@ -74,6 +74,8 @@
 #define XFS_SB_OFFSET		     0x00
 #define XFS_MAGIC_OFFSET	     0x00
 #define XFS_MAGIC		     "XFSB"
+#define XFS_LABEL_OFFS		     0x6c
+#define XFS_MAX_LABEL_SIZE	     12
 
 static bool is_fat(FILE *);
 static bool is_ntfs(FILE *);
@@ -498,6 +500,28 @@ cd9660_get_volid(const char *path)
 	return (p);
 }
 
+char *
+get_xfs_label(const char *path)
+{
+	FILE	    *fp;
+	u_char	    *p;
+	static char  label[XFS_MAX_LABEL_SIZE];
+
+	if ((fp = fopen(path, "r")) == NULL) {
+		warn("get_xfs_label(): fopen(%s)", path);
+		return (NULL);
+	}
+	if ((p = bbread(fp, XFS_LABEL_OFFS, 12)) == NULL) {
+		warn("get_xfs_label(): bbread()");
+		(void)fclose(fp);
+		return (NULL);
+	}
+	(void)fclose(fp);
+	(void)strlcpy(label, (char *)p, sizeof(label) - 1);
+
+	return (label);
+}
+
 /*
  * Return a drive's glabel with the given prefix, or return the first matching
  * glabel if 'prefix' is NULL.
@@ -601,6 +625,8 @@ get_label(const char *dev, const char *fs)
 		return (get_ugen_label(dev));
 	if (strcmp(fs, "msdosfs") == 0)
 		label = get_geom_label(path, "msdosfs");
+	else if (strcmp(fs, "xfs") == 0)
+		label = get_xfs_label(path);
 	else if (strcmp(fs, "ufs") == 0) {
 		if ((label = get_geom_label(path, "label")) == NULL &&
 		    (label = get_geom_label(path, "ufs")) == NULL &&
