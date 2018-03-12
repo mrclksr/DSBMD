@@ -73,9 +73,9 @@
 
 #define XFS_SB_OFFSET		     0x00
 #define XFS_MAGIC_OFFSET	     0x00
-#define XFS_MAGIC		     "XFSB"
-#define XFS_LABEL_OFFS		     0x6c
 #define XFS_MAX_LABEL_SIZE	     12
+#define XFS_LABEL_OFFSET	     0x6c
+#define XFS_MAGIC		     "XFSB"
 
 #define BTRFS_SB_OFFSET		     0x10000
 #define BTRFS_MAGIC_OFFSET	     0x40
@@ -426,7 +426,6 @@ getfs(const char *disk)
 	return (NULL);
 }
 
-
 char *
 get_exfat_label(const char *dev)
 {
@@ -533,14 +532,13 @@ get_xfs_label(const char *path)
 		warn("get_xfs_label(): fopen(%s)", path);
 		return (NULL);
 	}
-	if ((p = bbread(fp, XFS_LABEL_OFFS, 12)) == NULL) {
+	p = bbread(fp, XFS_LABEL_OFFSET, sizeof(label));
+	(void)fclose(fp);
+	if (p == NULL) {
 		warn("get_xfs_label(): bbread()");
-		(void)fclose(fp);
 		return (NULL);
 	}
-	(void)fclose(fp);
 	(void)strlcpy(label, (char *)p, sizeof(label) - 1);
-
 	return (label);
 }
 
@@ -555,12 +553,12 @@ get_btrfs_label(const char *path)
 		warn("get_btrfs_label(): fopen(%s)", path);
 		return (NULL);
 	}
-	if ((p = bbread(fp, BTRFS_SB_OFFSET, sizeof(label))) == NULL) {
+	p = bbread(fp, BTRFS_SB_OFFSET, sizeof(label));
+	(void)fclose(fp);
+	if (p == NULL) {
 		warn("get_btrfs_label(): bbread()");
-		(void)fclose(fp);
 		return (NULL);
 	}
-	(void)fclose(fp);
 	(void)strlcpy(label, (char *)&p[BTRFS_LABEL_OFFSET],
 	    sizeof(label) - 1);
 	return (label);
