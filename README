@@ -24,7 +24,7 @@ FEATURES
          can be defined.
 
      •   Supported filesystems are: ISO-9660, FAT, NTFS, UFS, Ext2/3, Ext4,
-         HFS+, exFAT, and XFS.
+         HFS+, exFAT, XFS, and Btrfs.
 
      •   Mounts and unmounts not initiated though DSBMD are detected, and
          necessary action are taken.
@@ -271,4 +271,4 @@ DSBMD PROTOCOL SPECIFICATION
      used and ‘free’ is the number of free bytes. If the device/media is not
      mounted, ‘free’ and ‘used’ are 0.
 
-                                March 11, 2018
+                                March 12, 2018
