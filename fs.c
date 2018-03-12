@@ -77,6 +77,12 @@
 #define XFS_LABEL_OFFS		     0x6c
 #define XFS_MAX_LABEL_SIZE	     12
 
+#define BTRFS_SB_OFFSET		     0x10000
+#define BTRFS_MAGIC_OFFSET	     0x40
+#define BTRFS_LABEL_OFFSET	     0x12b
+#define BTRFS_MAX_LABEL_SIZE	     0x100
+#define BTRFS_MAGIC		     "_BHRfS_M"
+
 static bool is_fat(FILE *);
 static bool is_ntfs(FILE *);
 static bool is_exfat(FILE *);
@@ -86,6 +92,7 @@ static bool is_ext4(FILE *dev);
 static bool is_iso9660(FILE *);
 static bool is_hfsp(FILE *);
 static bool is_xfs(FILE *);
+static bool is_btrfs(FILE *);
 
 fs_t fstype[] = {
 	{ "ufs",      UFS,     NULL, NULL,    NULL },
@@ -99,7 +106,8 @@ fs_t fstype[] = {
 	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL },
 	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL },
 	{ "hfsp",     HFSP,    NULL, NULL,    NULL },
-	{ "xfs",      XFS,     NULL, NULL,    NULL }
+	{ "xfs",      XFS,     NULL, NULL,    NULL },
+	{ "btrfs",    BTRFS,   NULL, NULL,    NULL }
 };
 
 const int nfstypes = sizeof(fstype) / sizeof(fstype[0]);
@@ -116,7 +124,8 @@ static struct getfs_s {
 	{ is_ext,      EXT     },
 	{ is_iso9660,  CD9660  },
 	{ is_hfsp,     HFSP    },
-	{ is_xfs,      XFS     }
+	{ is_xfs,      XFS     },
+	{ is_btrfs,    BTRFS   }
 };
 
 static uint8_t *
@@ -378,6 +387,19 @@ is_xfs(FILE *dev)
 	return (false);
 }
 
+static bool
+is_btrfs(FILE *dev)
+{
+	uint8_t *p;
+
+	if ((p = bbread(dev, BTRFS_SB_OFFSET, DFLTSBSZ)) == NULL)
+		return (false);
+	if (strncmp((char *)&p[BTRFS_MAGIC_OFFSET], BTRFS_MAGIC,
+	    strlen(BTRFS_MAGIC)) == 0)
+		return (true);
+	return (false);
+}
+
 fs_t *
 getfs(const char *disk)
 {
@@ -522,6 +544,28 @@ get_xfs_label(const char *path)
 	return (label);
 }
 
+char *
+get_btrfs_label(const char *path)
+{
+	FILE	    *fp;
+	u_char	    *p;
+	static char  label[BTRFS_MAX_LABEL_SIZE];
+
+	if ((fp = fopen(path, "r")) == NULL) {
+		warn("get_btrfs_label(): fopen(%s)", path);
+		return (NULL);
+	}
+	if ((p = bbread(fp, BTRFS_SB_OFFSET, sizeof(label))) == NULL) {
+		warn("get_btrfs_label(): bbread()");
+		(void)fclose(fp);
+		return (NULL);
+	}
+	(void)fclose(fp);
+	(void)strlcpy(label, (char *)&p[BTRFS_LABEL_OFFSET],
+	    sizeof(label) - 1);
+	return (label);
+}
+
 /*
  * Return a drive's glabel with the given prefix, or return the first matching
  * glabel if 'prefix' is NULL.
@@ -625,6 +669,8 @@ get_label(const char *dev, const char *fs)
 		return (get_ugen_label(dev));
 	if (strcmp(fs, "msdosfs") == 0)
 		label = get_geom_label(path, "msdosfs");
+	else if (strcmp(fs, "btrfs") == 0)
+		label = get_btrfs_label(path);
 	else if (strcmp(fs, "xfs") == 0)
 		label = get_xfs_label(path);
 	else if (strcmp(fs, "ufs") == 0) {

@@ -392,6 +392,9 @@ main(int argc, char *argv[])
 		case XFS:
 			INITFS(i, XFS);
 			break;
+		case BTRFS:
+			INITFS(i, BTRFS);
+			break;
 		default:
 			/* Just to soothe clang. */
 			break;
