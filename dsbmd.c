@@ -2513,8 +2513,8 @@ add_device(const char *devname)
 			return (add_mtp_device(devname));
 		else if (dev.st->type == ST_PTP)
 			return (add_ptp_device(devname));
-		else if (is_parted(devname) && !match_part_dev(devname, 0)) {
-			/* Only add slices of partitioned disks. */
+		else if (!is_mountable(devname)) {
+
 			return (NULL);
 		}
 	} else if (dev.iface->type != IF_TYPE_CD)
