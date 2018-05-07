@@ -2514,8 +2514,14 @@ add_device(const char *devname)
 		else if (dev.st->type == ST_PTP)
 			return (add_ptp_device(devname));
 		else if (is_parted(devname) && !match_part_dev(devname, 0)) {
-			/* Only add slices of partitioned disks. */
-			return (NULL);
+			/*
+			 * In most cases, we only want to add slices of
+			 * partitioned disks. But there is a special case:
+			 * ISO-FS. It is mountable by itself.
+			 */
+			fs_t *fs = getfs(devpath(devname));
+			if ((fs == NULL) || (fs->id != CD9660))
+				return (NULL); 
 		}
 	} else if (dev.iface->type != IF_TYPE_CD)
 		return (NULL);
