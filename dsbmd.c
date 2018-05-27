@@ -215,7 +215,8 @@ const iface_t interfaces[] = {
 	{ RE_LVM,	IF_TYPE_LVM  },
 	{ RE_MMC,	IF_TYPE_MMC  },
 	{ RE_MD,	IF_TYPE_MD   },
-	{ RE_FUSE,	IF_TYPE_FUSE }
+	{ RE_FUSE,	IF_TYPE_FUSE },
+	{ RE_NVD,	IF_TYPE_NVD  }
 };
 
 /*
