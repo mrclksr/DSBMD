@@ -58,6 +58,7 @@
 #include <sys/disklabel.h>
 #include <sys/iconv.h>
 #include <sys/linker.h>
+#include <sys/mdioctl.h>
 #include <sys/module.h>
 #include <sys/mount.h>
 #include <sys/param.h>
@@ -119,6 +120,7 @@ static int	set_cdrspeed(client_t *, sdev_t *, int);
 static int	set_msdosfs_locale(const char *, struct iovec**, int *);
 static int	uconnect(const char *);
 static int	devd_connect(void);
+static int	detach_mddev(sdev_t *);
 static int	send_string(int, const char *);
 static int	client_readln(client_t *, int *);
 static int	serve_client(client_t *);
@@ -2564,7 +2566,8 @@ add_device(const char *devname)
 			}
 		}
 	}
-	if (dev.iface->type == IF_TYPE_DA || dev.iface->type == IF_TYPE_CD)
+	if (dev.iface->type == IF_TYPE_DA || dev.iface->type == IF_TYPE_CD ||
+	    dev.iface->type == IF_TYPE_MD)
 		dev.ejectable = true;
 	else
 		dev.ejectable = false;
@@ -2948,6 +2951,13 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 			return (error);
 		}
 	}
+	if (devp->iface->type == IF_TYPE_MD) {
+		if ((error = detach_mddev(devp)) != 0)
+			cliprint(cli, "E:command=eject:code=%d", error);
+		else
+			cliprint(cli, "O:command=eject");
+		return (error);
+	}
 	if (devp->iface->type == IF_TYPE_LVM)
 		disk = get_diskname(devp->realdev);
 	else
@@ -3010,6 +3020,38 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 			devp->has_media = false;
 			notifybc(devp, false);
 		}
+	}
+	return (error);
+}
+
+static int
+detach_mddev(sdev_t *devp)
+{
+	int             error, fd;
+	char		numb[4], *nump;
+	const char	*mdname;
+	struct md_ioctl mdio;
+
+	error = 0;
+	for (mdname = devbasename(devp->dev) + strlen("md"), nump = numb;
+	    isdigit(*mdname); mdname++) {
+		*nump++ = *mdname;
+	}
+	*nump = '\0';
+
+	(void)memset(&mdio, 0, sizeof(mdio));
+	if ((mdio.md_file = malloc(PATH_MAX)) == NULL)
+		die("malloc()");
+	(void)memset(mdio.md_file, 0, PATH_MAX);
+	mdio.md_unit    = strtol(numb, NULL, 10);
+	mdio.md_version = MDIOVERSION;
+	if ((fd = open(_PATH_DEV MDCTL_NAME, O_RDWR, 0)) == -1) {
+		error = errno;
+		logprint("open(%s%s)", _PATH_DEV, MDCTL_NAME);
+	} else if (ioctl(fd, MDIOCDETACH, &mdio) == -1) {
+		error = errno;
+		logprint("ioctl(%s%s, MDIOCDETACH)", _PATH_DEV, MDCTL_NAME);
+		(void)close(fd);
 	}
 	return (error);
 }
