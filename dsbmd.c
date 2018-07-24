@@ -432,6 +432,29 @@ main(int argc, char *argv[])
 
 	logprintx("%s started", PROGRAM);
 
+	/* Open the listening socket for the clients. */
+        (void)unlink(PATH_DSBMD_SOCKET);
+	if ((lsock = socket(AF_LOCAL, SOCK_STREAM, 0)) == -1)
+		die("socket()");
+	(void)memset((char *)&s_addr, 0, sizeof(s_addr));
+	(void)memcpy(s_addr.sun_path, PATH_DSBMD_SOCKET,
+	    strlen(PATH_DSBMD_SOCKET));
+	s_addr.sun_family = AF_LOCAL;
+	if (bind(lsock, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
+		die("bind()");
+	if (chmod(PATH_DSBMD_SOCKET, SOCKET_MODE) == -1)
+		die("chmod(%s)", PATH_DSBMD_SOCKET);
+	if (listen(lsock, dsbcfg_getval(cfg, CFG_MAX_CLIENTS).integer) == -1)
+		die("listen()");
+	/*
+	 * Make the listening socket non blocking in order to protect the
+	 * server from certain DoS attacks.
+	 */
+	if ((sflags = fcntl(lsock, F_GETFL)) == -1)
+		die("fcntl()");
+	sflags |= O_NONBLOCK;
+	if (fcntl(lsock, F_SETFL, sflags) == -1)
+		die("fcntl()");
 	/* Get all currently installed disks. */
 	if (chdir(_PATH_DEV) == -1)
 		die("chdir(%s)", _PATH_DEV);
@@ -471,30 +494,6 @@ main(int argc, char *argv[])
 	(void)closedir(dirp);
 	if (chdir("/") == -1)
 		die("chdir(/)");
-
-	/* Open the listening socket for the clients. */
-        (void)unlink(PATH_DSBMD_SOCKET);
-	if ((lsock = socket(AF_LOCAL, SOCK_STREAM, 0)) == -1)
-		die("socket()");
-	(void)memset((char *)&s_addr, 0, sizeof(s_addr));
-	(void)memcpy(s_addr.sun_path, PATH_DSBMD_SOCKET,
-	    strlen(PATH_DSBMD_SOCKET));
-	s_addr.sun_family = AF_LOCAL;
-	if (bind(lsock, (struct sockaddr *)&s_addr, sizeof(s_addr)) == -1)
-		die("bind()");
-	if (chmod(PATH_DSBMD_SOCKET, SOCKET_MODE) == -1)
-		die("chmod(%s)", PATH_DSBMD_SOCKET);
-	if (listen(lsock, dsbcfg_getval(cfg, CFG_MAX_CLIENTS).integer) == -1)
-		die("listen()");
-	/*
-	 * Make the listening socket non blocking in order to protect the
-	 * server from certain DoS attacks.
-	 */
-	if ((sflags = fcntl(lsock, F_GETFL)) == -1)
-		die("fcntl()");
-	sflags |= O_NONBLOCK;
-	if (fcntl(lsock, F_SETFL, sflags) == -1)
-		die("fcntl()");
 	if (socketpair(PF_LOCAL, SOCK_SEQPACKET, 0, ipcsv) == -1)
 		die("socketpair()");
 	maxfd = lsock > ipcsv[0] ? lsock : ipcsv[0];
