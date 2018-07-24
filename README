@@ -45,6 +45,8 @@ FEATURES
 
      •   Support for PTP devices
 
+     •   Support for NVD devices
+
 OPTIONS
      -f      Run DSBMD in foreground.
 
@@ -66,10 +68,10 @@ SETUP
            dsbmd_enable="YES"
 
      Depending on your needs, install the FreeBSD ports fusefs-exfat,
-     fusefs-gphotofs, fusefs-ntfs, fusefs-ext2, and fusefs-simple-mtpfs.  For
-     mounting HFS+ volumes, install hfsfuse (https://github.com/0x09/hfsfuse).
-     DSBMD comes with predefined commands in dsbmd.conf that use these ports
-     to mount the corresponding filesystems.
+     fusefs-gphotofs, fusefs-ntfs, fusefs-ext2 (Ext2/3/4), fusefs-hfsfuse,
+     fusefs-lkl (BTRFS, Ext4, and XFS), and fusefs-simple-mtpfs.  DSBMD comes
+     with predefined commands in dsbmd.conf that use these ports to mount the
+     corresponding filesystems.
 
      For further configuration, see dsbmd.conf.
 
@@ -271,4 +273,4 @@ DSBMD PROTOCOL SPECIFICATION
      used and ‘free’ is the number of free bytes. If the device/media is not
      mounted, ‘free’ and ‘used’ are 0.
 
-                                March 12, 2018
+                                 July 24, 2018
