@@ -3053,6 +3053,8 @@ detach_mddev(sdev_t *devp)
 		logprint("ioctl(%s%s, MDIOCDETACH)", _PATH_DEV, MDCTL_NAME);
 		(void)close(fd);
 	}
+	free(mdio.md_file);
+
 	return (error);
 }
 
