@@ -45,6 +45,8 @@ Support for Linux LVM logical volumes through geom_linux_lvm(4)
 Support for MTP devices
 .It
 Support for PTP devices
+.It
+Support for NVD devices
 .El
 .Sh OPTIONS
 .Bl -tag
@@ -74,12 +76,11 @@ dsbmd_enable="YES"
 .Ed
 .Pp
 Depending on your needs, install the FreeBSD ports
-.Em fusefs-exfat , fusefs-gphotofs, fusefs-ntfs , fusefs-ext2, 
-and
+.Em fusefs-exfat , fusefs-gphotofs , fusefs-ntfs , fusefs-ext2
+(Ext2/3/4),
+.Em fusefs-hfsfuse , fusefs-lkl
+(BTRFS, Ext4, and XFS), and
 .Em fusefs-simple-mtpfs .
-For mounting HFS+ volumes, install
-.Em hfsfuse 
-(https://github.com/0x09/hfsfuse).
 .Nm
 comes with predefined commands in
 .Em dsbmd.conf
