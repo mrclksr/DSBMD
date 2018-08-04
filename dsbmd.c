@@ -3027,22 +3027,14 @@ static int
 detach_mddev(sdev_t *devp)
 {
 	int             error, fd;
-	char		numb[4], *nump;
-	const char	*mdname;
 	struct md_ioctl mdio;
 
 	error = 0;
-	for (mdname = devbasename(devp->dev) + strlen("md"), nump = numb;
-	    isdigit(*mdname); mdname++) {
-		*nump++ = *mdname;
-	}
-	*nump = '\0';
-
 	(void)memset(&mdio, 0, sizeof(mdio));
 	if ((mdio.md_file = malloc(PATH_MAX)) == NULL)
 		die("malloc()");
 	(void)memset(mdio.md_file, 0, PATH_MAX);
-	mdio.md_unit    = strtol(numb, NULL, 10);
+	mdio.md_unit    = strtol(devbasename(devp->dev) + 2, NULL, 10);
 	mdio.md_version = MDIOVERSION;
 	if ((fd = open(_PATH_DEV MDCTL_NAME, O_RDWR, 0)) == -1) {
 		error = errno;
