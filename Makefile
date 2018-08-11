@@ -11,11 +11,13 @@ CFGDIR	       	     = ${PREFIX}/etc
 DOCSDIR		    ?= ${PREFIX}/share/doc/${PROGRAM}
 DOCS		     = README
 SOURCES		     = ${PROGRAM}.c config.c dsbcfg/dsbcfg.c fs.c common.c
+FREEBSD_VERSION	     = `freebsd-version -u | awk -F"[.-]" '{ print $$1 }'`
 PROGRAM_FLAGS	     = -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_LOG=\"${LOGFILE}\"
 PROGRAM_FLAGS	    += -DPATH_PID_FILE=\"${PIDFILE}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_SOCKET=\"${SOCKETPATH}\"
 PROGRAM_FLAGS	    += -DPATH_CONFIG=\"${CFGDIR}/${CFGFILE}\"
+PROGRAM_FLAGS	    += -DFREEBSD_VERSION=${FREEBSD_VERSION}
 PROGRAM_LIBS	     = -lgeom -lcam -lutil -lkiconv -lpthread -lusb
 BSD_INSTALL_DATA    ?= install -m 0644
 BSD_INSTALL_SCRIPT  ?= install -m 555
@@ -32,8 +34,8 @@ ${RCSCRIPT}: ${RCSCRIPT}.tmpl
 	< ${.ALLSRC} > ${RCSCRIPT}
 
 ${CFGFILE}: ${CFGFILE}.tmpl
-	# Remove "large" mount option from config file on FreeBSD >= 12
-	version=`freebsd-version -u | awk -F"[.-]" '{ print $$1 }'`; \
+# Remove "large" mount option from config file on FreeBSD >= 12
+	version=${FREEBSD_VERSION}; \
 	if [ $${version} -ge 12 ]; then \
 		sed 's|large,||g' ${CFGFILE}.tmpl > ${CFGFILE}; \
 	else cp ${CFGFILE}.tmpl ${CFGFILE}; fi
