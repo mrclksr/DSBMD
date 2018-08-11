@@ -23,6 +23,7 @@
  */
 
 #include <err.h>
+#include <string.h>
 
 #include "dsbcfg/dsbcfg.h"
 #include "config.h"
@@ -100,5 +101,42 @@ check_cfg_version(dsbcfg_t *cfg)
 		warnx("***********************************************"	\
 		      "******************\n");
 	}
+}
+
+void
+check_cfg_opts(dsbcfg_t *cfg)
+{
+#if FREEBSD_VERSION >= 12
+	/* In case of FreeBSD >= 12 and msdosfs: remove the "large" option. */
+	bool large;
+	char *p, *mopts;
+
+	mopts = dsbcfg_getval(cfg, CFG_MSDOSFS_OPTS).string;
+	if (mopts == NULL)
+		return;
+	do {
+		if ((p = strstr(mopts, ",large")) != NULL ||
+		    (p = strstr(mopts, "large,")) != NULL)
+			(void)memmove(p, p + 6, strlen(p + 6) + 1);
+		else if ((p = strstr(mopts, "large")) != NULL)
+			memmove(p, p + 5, strlen(p + 5) + 1);
+		if (p != NULL)
+			large = true;
+	} while (p != NULL);
+
+	if (!large)
+		return;
+	warnx("*********************************************" \
+	    "********************");
+	warnx("WARNING");
+	warnx("");
+	warnx("Ignoring deprecated 'large' mount option for msdosfs.");
+	warnx("On FreeBSD >= 12 (as of r319735) this option was removed.");
+	warnx("");
+	warnx("Please adjust your dsbmd.conf.");
+	warnx("");
+	warnx("*********************************************" \
+	    "********************\n");
+#endif
 }
 
