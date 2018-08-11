@@ -301,6 +301,7 @@ main(int argc, char *argv[])
 	if (cfg == NULL)
 		errx(EXIT_FAILURE, "%s", dsbcfg_strerror());
 	check_cfg_version(cfg);
+	check_cfg_opts(cfg);
 
 	/*
 	 * Generate UID list of allowed users.
@@ -1604,7 +1605,6 @@ check_permission(uid_t uid, gid_t *gids)
 	}
 	return (false);
 }
-
 
 static int
 mount_device(client_t *cli, sdev_t *devp)
