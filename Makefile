@@ -9,7 +9,7 @@ BINDIR	       	     = ${PREFIX}/libexec
 RCDIR	       	     = ${PREFIX}/etc/rc.d
 CFGDIR	       	     = ${PREFIX}/etc
 DOCSDIR		    ?= ${PREFIX}/share/doc/${PROGRAM}
-DOCS		     = README
+DOCS		     = readme.mdoc
 SOURCES		     = ${PROGRAM}.c config.c dsbcfg/dsbcfg.c fs.c common.c
 FREEBSD_VERSION	     = `freebsd-version -u | awk -F"[.-]" '{ print $$1 }'`
 PROGRAM_FLAGS	     = -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
