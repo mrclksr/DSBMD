@@ -223,6 +223,10 @@ supports the following commands:
 > will return the total size in bytes, and if the device is mounted, it
 > will also return the number of used and free bytes.
 
+**mdattach** *&lt;/path/to/image&gt;*
+
+> Create a memory disk to access the given disk image.
+
 # 2.0 DAEMON SIDE
 
 ## 2.1 GENERAL DSBMD MESSAGE FORMAT
@@ -265,19 +269,21 @@ supports the following commands:
 	258             Permission denied  
 	259             Device not mounted  
 	260             Device busy  
-	261             such device  
+	261             No such device  
 	262             Max. number of connections reached  
 	263             Not ejectable  
 	264             Unknown command  
 	265             Unknown option  
 	266             Syntax error  
-	267             media  
+	267             No media  
 	268             Unknown filesystem  
 	269             Unknown error  
-	270             Ta Mount command failed  
+	270             Mount command failed  
 	271             Invalid Argument  
-	272             Ta Command string too long  
-	273             Invalid command string
+	272             Command string too long  
+	273             Invalid command string  
+	274             Timeout  
+	275             Not a regular file
 
 ## 2.5 DSBMD MESSAGES
 
@@ -363,4 +369,4 @@ and
 'used'
 are 0.
 
- \- July 24, 2018
+ \- August 30, 2018
