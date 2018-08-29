@@ -64,7 +64,7 @@ enum {
 	ERR_NOT_EJECTABLE, ERR_UNKNOWN_COMMAND, ERR_UNKNOWN_OPTION,
 	ERR_SYNTAX_ERROR, ERR_NO_MEDIA, ERR_UNKNOWN_FILESYSTEM,
 	ERR_UNKNOWN_ERROR, ERR_MNTCMD_FAILED, ERR_INVALID_ARGUMENT,
-	ERR_STRING_TOO_LONG, ERR_BAD_STRING, ERR_TIMEOUT
+	ERR_STRING_TOO_LONG, ERR_BAD_STRING, ERR_TIMEOUT, ERR_NOT_A_FILE
 };
 
 typedef enum DEV_TYPES {
@@ -144,7 +144,7 @@ typedef struct client_s {
 	int    s;			  /* Client socket. */
 	int    id;			  /* Unique ID */
 	bool   overflow;		  /* Read command string too long */
-	char   buf[64];			  /* String buffer for commands. */
+	char   buf[64 + PATH_MAX];	  /* String buffer for commands. */
 	char   msg[128];		  /* Message buffer. */
 	uid_t  uid;			  /* Client UID. */
 	gid_t *gids;			  /* Client GIDs. */
