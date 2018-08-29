@@ -120,6 +120,7 @@ static int	set_cdrspeed(client_t *, sdev_t *, int);
 static int	set_msdosfs_locale(const char *, struct iovec**, int *);
 static int	uconnect(const char *);
 static int	devd_connect(void);
+static int	attach_mddev(client_t *, const char *);
 static int	detach_mddev(sdev_t *);
 static int	send_string(int, const char *);
 static int	client_readln(client_t *, int *);
@@ -164,6 +165,7 @@ static void	cmd_speed(client_t *, char **);
 static void	cmd_size(client_t *, char **);
 static void	cmd_mount(client_t *, char **);
 static void	cmd_unmount(client_t *, char **);
+static void	cmd_mdattach(client_t *, char **);
 static void	cmd_quit(client_t *cli, char **);
 static void	notifybc(sdev_t *, bool);
 static void	notify(client_t *, sdev_t *, bool);
@@ -233,7 +235,8 @@ struct command_s {
 	{ "unmount",	&cmd_unmount },
 	{ "eject",	&cmd_eject   },
 	{ "speed",	&cmd_speed   },
-	{ "size",	&cmd_size    }
+	{ "size",	&cmd_size    },
+	{ "mdattach",	&cmd_mdattach}
 };
 
 /* 
@@ -3024,6 +3027,76 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 }
 
 static int
+attach_mddev(client_t *cli, const char *image)
+{
+	int             error, fd;
+	gid_t		*gp;
+	struct stat	sb;
+	struct md_ioctl mdio;
+
+	error = 0;
+	(void)memset(&mdio, 0, sizeof(mdio));
+
+	mdio.md_type	= MD_VNODE;
+	mdio.md_version	= MDIOVERSION;
+	mdio.md_options	= MD_AUTOUNIT| MD_CLUSTER | MD_COMPRESS;
+
+	if ((mdio.md_file = realpath(image, NULL)) == NULL) {
+		logprint("realpath(%s)", image);
+		goto error;
+	}
+	if (stat(mdio.md_file, &sb) == -1) {
+		logprint("stat(%s)", mdio.md_file);
+		goto error;
+	}
+	if (!S_ISREG(sb.st_mode)) {
+		error = ERR_NOT_A_FILE;
+		goto error;
+	}
+	if (sb.st_uid != cli->uid) {
+		for (gp = cli->gids; *gp != (gid_t)-1; gp++) {
+			if (sb.st_gid == *gp)
+				break;
+		}
+		if (*gp == (gid_t)-1 || !(S_IRGRP & sb.st_mode))
+			error = ERR_PERMISSION_DENIED;
+		if (!(S_IWGRP & sb.st_mode))
+			mdio.md_options |= MD_READONLY;
+	} else {
+		if (!(S_IRUSR & sb.st_mode))
+			error = ERR_PERMISSION_DENIED;
+		if (!(S_IWUSR & sb.st_mode))
+			mdio.md_options |= MD_READONLY;
+	}
+	if (error != 0)
+		goto error;
+	mdio.md_mediasize = sb.st_size;
+
+	if (!kld_isloaded("g_md") && kld_load("geom_md") == -1) {
+		logprint("kld_load(geom_md)");
+		goto error;
+	}
+	if ((fd = open(_PATH_DEV MDCTL_NAME, O_RDWR, 0)) == -1) {
+		logprint("open(%s%s)", _PATH_DEV, MDCTL_NAME);
+		goto error;
+	}
+	if (ioctl(fd, MDIOCATTACH, &mdio) == -1) {
+		logprint("ioctl(%s%s)", _PATH_DEV, MDCTL_NAME);
+		goto error;
+	}
+	cliprint(cli, "O:command=mdattach");
+	free(mdio.md_file);
+
+	return (0);
+error:
+	cliprint(cli, "E:command=mdattach:code=%d",
+	    error != 0 ? error : errno);
+	free(mdio.md_file);
+
+	return (-1);
+}
+
+static int
 detach_mddev(sdev_t *devp)
 {
 	int             error, fd;
@@ -3432,6 +3505,16 @@ cmd_unmount(client_t *cli, char **argv)
 		return;
 	}
 	(void)unmount_device(cli, devp, force, false);
+}
+
+static void
+cmd_mdattach(client_t *cli, char **argv)
+{
+	if (argv[0] == NULL) {
+		cliprint(cli, "E:command=mdattach:code=%d", ERR_SYNTAX_ERROR);
+		return;
+	}
+	(void)attach_mddev(cli, argv[0]);
 }
 
 static void
