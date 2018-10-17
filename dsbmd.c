@@ -259,7 +259,7 @@ enum {
 	MSGTYPE_CHECK_FOR_MEDIA, MSGTYPE_MEDIA_REMOVED
 };
 
-static bool	polling	      = false;	/* Do(n't) poll devices */
+static int	ipcsv[2];
 static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
 static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
 static dsbcfg_t	*cfg	      = NULL;
@@ -274,7 +274,7 @@ int
 main(int argc, char *argv[])
 {
 	int	       i, sflags, maxfd, ch, lsock;
-	int	       csock, mntchkiv, ipcsv[2];
+	int	       csock, mntchkiv;
 	DIR	       *dirp, *dirp2;
 	bool	       fflag;
 	FILE	       *fp;
@@ -366,10 +366,6 @@ main(int argc, char *argv[])
 		    dsbcfg_varname(cfg, CFG_MNTCHK_INTERVAL));
 		mntchkiv = 1;
 	}
-	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer > 0)
-		polling = true;
-	else
-		polling = false;
 	for (i = 0; i < nfstypes; i++) {
 		switch (fstype[i].id) {
 		case UFS:
@@ -512,18 +508,10 @@ main(int argc, char *argv[])
 	FD_SET(lsock, &allset); FD_SET(ipcsv[0], &allset);
 
 	(void)pthread_mutex_init(&ipcsockmtx, NULL);
+	(void)pthread_mutex_init(&pollqmtx, NULL);
 
-	if (polling) {
-		polling = true;
-		(void)pthread_mutex_init(&pollqmtx, NULL);
-		if (pthread_create(&tid, NULL, poll_thr, &ipcsv[1]) != 0)
-			die("pthread_create()");
-		(void)pthread_detach(tid);
-	}
 	if (pthread_create(&tid, NULL, devd_thr, &ipcsv[1]) != 0)
 		die("pthread_create()");
-	(void)pthread_detach(tid);
-
 	/* Main loop. */
 	for (mntchktime = 0;;) {
 		rset = allset;
@@ -934,14 +922,19 @@ parse_devd_event(char *str)
 static void *
 poll_thr(void *socket)
 {
-	int	s, polliv;
+	int	s;
 	sdev_t *devp;
 	struct ipcmsg_s msg;
 
  	s = *(int *)socket;
-	polliv = dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer;
-	for (;; sleep(polliv)) {
+	for (;; sleep(3)) {
 		(void)pthread_mutex_lock(&pollqmtx);
+		if (SLIST_EMPTY(&pollq)) {
+			/* Queue empty. Terminate thread */
+			warnx("QUEUE EMPTY. TERMINATING THREAD");
+			(void)pthread_mutex_unlock(&pollqmtx);
+			pthread_exit(NULL);
+		}
 		while ((devp = media_changed()) != NULL) {
 			msg.type = MSGTYPE_UPDATE_DEVICE;
 			msg.devp = devp;
@@ -994,8 +987,7 @@ devd_thr(void *ipcsock)
 			    strlen(SCSI_SENSE_BECOMING_READY)) == 0) {
 				/* Media becoming ready */
 				devp = lookup_dev(devdevent.device);
-				if (devp != NULL && !devp->has_media &&
-				    devp->iface->type == IF_TYPE_CD) {
+				if (devp != NULL && !devp->has_media) {
 					warnx("MEDIA BECOMING READY");
 					warnx("SENDING CHECK_FOR_MEDIA MSG");
 					msg.type = MSGTYPE_CHECK_FOR_MEDIA;
@@ -1007,8 +999,7 @@ devd_thr(void *ipcsock)
 			    strlen(SCSI_SENSE_NOT_PRESENT)) == 0) {
 				/* Media not present */
 				devp = lookup_dev(devdevent.device);
-				if (devp != NULL && devp->has_media &&
-				    devp->iface->type == IF_TYPE_CD) {
+				if (devp != NULL && devp->has_media) {
 					warnx("MEDIA NOT PRESENT");
 					warnx("SENDING MEDIA REMOVED MSG");
 					msg.type = MSGTYPE_MEDIA_REMOVED;
@@ -1036,6 +1027,7 @@ static void
 add_to_pollqueue(sdev_t *devp)
 {
 	size_t	    len;
+	pthread_t   tid;
 	const char *dev;
 	struct devlist_s *ep;
 
@@ -1045,6 +1037,13 @@ add_to_pollqueue(sdev_t *devp)
 		/* Do not add slices */
 		(void)pthread_mutex_unlock(&pollqmtx);
 		return;
+	}
+	if (SLIST_EMPTY(&pollq)) {
+		/* Start poll thread */
+		warnx("QUEUE EMPTY. STARTING THREAD");
+		if (pthread_create(&tid, NULL, poll_thr, &ipcsv[1]) != 0)
+			die("pthread_create()");
+		(void)pthread_detach(tid);
 	}
 	len = strlen(devp->dev);
 	SLIST_FOREACH(ep, &pollq, next) {
@@ -2428,7 +2427,6 @@ add_ptp_device(const char *ugen)
 	devp->glabel[0]   = NULL;
 	devp->mounted     = false;
 	devp->has_media   = true;
-	devp->polling     = false;
 	devp->ejectable	  = false;
 	devp->visible	  = true;
 	devp->mntpt	  = NULL;
@@ -2485,7 +2483,6 @@ add_mtp_device(const char *ugen)
 	devp->glabel[0]   = NULL;
 	devp->mounted     = false;
 	devp->has_media   = true;
-	devp->polling     = false;
 	devp->ejectable	  = false;
 	devp->visible	  = true;
 	devp->mntpt	  = NULL;
@@ -2535,7 +2532,6 @@ add_fuse_device(const char *mntpt)
 	devp->glabel[0]	  = NULL;
 	devp->mounted	  = true;
 	devp->has_media	  = true;
-	devp->polling	  = false;
 	devp->visible	  = true;
 	devp->ejectable	  = false;
 	devp->cmd_mounted = false;
@@ -2557,7 +2553,7 @@ static sdev_t *
 add_device(const char *devname)
 {
 	int	    i, j, speed, fd;
-	char	    **v, *diskname, *path, *realdev;
+	char	    *path, *realdev;
 	sdev_t	    *devp, dev = { 0 };
 	const char  *p;
 	struct stat sb;
@@ -2569,14 +2565,8 @@ add_device(const char *devname)
 
 	if ((dev.iface = iface_from_name(devname)) == NULL)
 		return (NULL);
-	dev.polling = false;
 	if ((dev.st = get_storage_type(devname)) != NULL) {
-		if (dev.st->type == ST_USB_CARDREADER) {
-			diskname = get_diskname(devname);
-			/* Only poll disk device, not slices. */
-			if (strcmp(diskname, devname) == 0)
-				dev.polling = true;
-		} else if (dev.st->type == ST_MTP)
+		if (dev.st->type == ST_MTP)
 			return (add_mtp_device(devname));
 		else if (dev.st->type == ST_PTP)
 			return (add_ptp_device(devname));
@@ -2597,7 +2587,6 @@ add_device(const char *devname)
 		p = strchr(devname, '\0') - 1;
 		if (strchr("abcdefgh", *p) != NULL)
 			return (NULL);
-		dev.polling = false;
 	} 
 	if (dev.iface->type == IF_TYPE_LVM) {
 		realdev = get_lvm_dev(devname);
@@ -2665,7 +2654,6 @@ add_device(const char *devname)
 	devp->fs	  = dev.fs;
 	devp->mounted	  = false;
 	devp->mntpt       = NULL;
-	devp->polling	  = dev.polling;
 	devp->realdev     = dev.realdev;
 	devp->has_media   = dev.has_media;
 	devp->visible	  = false;
@@ -2697,16 +2685,6 @@ add_device(const char *devname)
 	default:
 		devp->model = NULL;
 	}
-	/* Ckeck if polling is undesirable for this device. */
-	for (v = dsbcfg_getval(cfg, CFG_POLL_EXCEPTIONS).strings;
-	    v != NULL && *v != NULL; v++) {
-		if (devp->model == NULL)
-			break;
-		if (fnmatch(*v, devp->model, FNM_CASEFOLD) == 0)
-			devp->polling = false;
-	}
-	if (polling && devp->polling)
-		add_to_pollqueue(devp);
 	if (devp->has_media && devp->fs != NULL)
 		devp->visible = true;
 	else if (devp->has_media && devp->st != NULL) {
@@ -2747,8 +2725,7 @@ del_device(sdev_t *devp)
 	}
 	if (ep == NULL)
 		return;
-	if (polling)
-		del_from_pollqueue(devp);
+	del_from_pollqueue(devp);
 	if (devp->has_media && devp->visible)
 		notifybc(devp, false);
 	/*
