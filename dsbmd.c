@@ -1043,6 +1043,7 @@ add_to_pollqueue(sdev_t *devp)
 	(void)pthread_mutex_lock(&pollqmtx);
 	if (match_part_dev(dev, 0)) {
 		/* Do not add slices */
+		(void)pthread_mutex_unlock(&pollqmtx);
 		return;
 	}
 	len = strlen(devp->dev);
