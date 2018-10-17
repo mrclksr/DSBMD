@@ -92,6 +92,9 @@
 #define USB_CLASS_UMASS	   0x08
 #define USB_PROTOCOL_PTP   0x01
 
+#define SCSI_SENSE_NOT_PRESENT	  "70 02 3a"
+#define SCSI_SENSE_BECOMING_READY "70 02 04 01"
+
 #define die(msg, ...) do { \
 	logprint(msg, ##__VA_ARGS__); exit(EXIT_FAILURE); \
 } while (0)
@@ -188,10 +191,12 @@ static const storage_type_t *get_storage_type(const char *);
  * Struct to represent the fields of a devd notify event.
  */
 struct devdevent_s {
-	char *system;	 /* Bus or DEVFS */
-	char *subsystem; /* Only CDEV is interesting to us. */
-	char *type;	 /* Event type: CREATE, DESTROY. */
-	char *cdev;	 /* Device name. */
+	char *system;	  /* Bus or DEVFS */
+	char *subsystem;  /* Only CDEV is interesting to us. */
+	char *type;	  /* Event type: CREATE, DESTROY. */
+	char *cdev;	  /* Device name. */
+	char *device;	  /* Device name (system == CAM) */
+	char *scsi_sense; /* SCSI sense code */
 } devdevent;
 
 static const char *glblprfx[NGLBLPRFX] = GLBLPRFX;
@@ -250,7 +255,8 @@ struct ipcmsg_s {
 };
 
 enum {
-	MSGTYPE_ADD_DEVICE = 1, MSGTYPE_UPDATE_DEVICE, MSGTYPE_DEL_DEVICE
+	MSGTYPE_ADD_DEVICE = 1, MSGTYPE_UPDATE_DEVICE, MSGTYPE_DEL_DEVICE,
+	MSGTYPE_CHECK_FOR_MEDIA, MSGTYPE_MEDIA_REMOVED
 };
 
 static bool	polling	      = false;	/* Do(n't) poll devices */
@@ -563,6 +569,14 @@ main(int argc, char *argv[])
 					del_device(devp);
 				break;
 			case MSGTYPE_UPDATE_DEVICE:
+				update_device(msg.devp);
+				break;
+			case MSGTYPE_CHECK_FOR_MEDIA:
+				add_to_pollqueue(msg.devp);
+				warnx("ADDING %s TO POLLQUEUE", msg.devp->dev);
+				break;
+			case MSGTYPE_MEDIA_REMOVED:
+				msg.devp->has_media = false;
 				update_device(msg.devp);
 			}
 		}
@@ -883,23 +897,37 @@ read_devd_event(int s, int *error)
 static void
 parse_devd_event(char *str)
 {
-	char *p, *q;
+	char	   *next, *var, *val;
+	const char *cs;
 
-	devdevent.cdev	 = "";
 	devdevent.system = devdevent.subsystem = devdevent.type = "";
+	devdevent.scsi_sense = devdevent.device = devdevent.cdev = "";
 
-	for (p = str; (p = strtok(p, " \n")) != NULL; p = NULL) {
-		if ((q = strchr(p, '=')) == NULL)
-			continue;
-		*q++ = '\0';
-		if (strcmp(p, "system") == 0)
-			devdevent.system = q;
-		else if (strcmp(p, "subsystem") == 0)
-			devdevent.subsystem = q;
-		else if (strcmp(p, "type") == 0)
-			devdevent.type = q;
-		else if (strcmp(p, "cdev") == 0)
-			devdevent.cdev = q;
+	while (*str != '\0' && (val = strchr(str, '=')) != NULL) {
+		while (isspace(*str))
+			str++;
+		*val++ = '\0'; var = str;
+		if (*val == '"') {
+			++val;
+			cs = "\"";
+		} else
+			cs = " \t\n";
+		next = val + strcspn(val, cs);
+		if (*next != '\0')
+			*next++ = '\0';
+		str = next;
+		if (strcmp(var, "system") == 0)
+			devdevent.system = val;
+		else if (strcmp(var, "subsystem") == 0)
+			devdevent.subsystem = val;
+		else if (strcmp(var, "type") == 0)
+			devdevent.type = val;
+		else if (strcmp(var, "cdev") == 0)
+			devdevent.cdev = val;
+		else if (strcmp(var, "device") == 0)
+			devdevent.device = val;
+		else if (strcmp(var, "scsi_sense") == 0)
+			devdevent.scsi_sense = val;
 	}
 }
 
@@ -931,6 +959,7 @@ devd_thr(void *ipcsock)
 {
 	int    ipc, devd, error;
 	char   *ev;
+	sdev_t *devp;
 	fd_set rset, _rset;
 	struct ipcmsg_s msg;
 
@@ -950,17 +979,44 @@ devd_thr(void *ipcsock)
 			if (ev[0] != '!')
 				continue;
 			parse_devd_event(ev + 1);
-			if (strcmp(devdevent.system, "DEVFS") != 0 ||
-			    strcmp(devdevent.subsystem, "CDEV") != 0)
+			if (strcmp(devdevent.system, "DEVFS") == 0 &&
+			    strcmp(devdevent.subsystem, "CDEV") == 0) {
+				if (strcmp(devdevent.type, "CREATE") == 0)
+					msg.type = MSGTYPE_ADD_DEVICE;
+				else if (strcmp(devdevent.type, "DESTROY") == 0)
+					msg.type = MSGTYPE_DEL_DEVICE;
+				else
+					continue;
+				(void)strncpy(msg.dev, devdevent.cdev,
+				    sizeof(msg.dev));
+			} else if (strncmp(devdevent.scsi_sense,
+			    SCSI_SENSE_BECOMING_READY,
+			    strlen(SCSI_SENSE_BECOMING_READY)) == 0) {
+				/* Media becoming ready */
+				devp = lookup_dev(devdevent.device);
+				if (devp != NULL && !devp->has_media &&
+				    devp->iface->type == IF_TYPE_CD) {
+					warnx("MEDIA BECOMING READY");
+					warnx("SENDING CHECK_FOR_MEDIA MSG");
+					msg.type = MSGTYPE_CHECK_FOR_MEDIA;
+					msg.devp = devp;
+				} else
+					continue;
+			} else if (strncmp(devdevent.scsi_sense,
+			    SCSI_SENSE_NOT_PRESENT,
+			    strlen(SCSI_SENSE_NOT_PRESENT)) == 0) {
+				/* Media not present */
+				devp = lookup_dev(devdevent.device);
+				if (devp != NULL && devp->has_media &&
+				    devp->iface->type == IF_TYPE_CD) {
+					warnx("MEDIA NOT PRESENT");
+					warnx("SENDING MEDIA REMOVED MSG");
+					msg.type = MSGTYPE_MEDIA_REMOVED;
+					msg.devp = devp;
+				} else
+					continue;
+			} else
 				continue;
-			if (strcmp(devdevent.type, "CREATE") == 0)
-				msg.type = MSGTYPE_ADD_DEVICE;
-			else if (strcmp(devdevent.type, "DESTROY") == 0)
-				msg.type = MSGTYPE_DEL_DEVICE;
-			else
-				continue;
-			(void)strncpy(msg.dev, devdevent.cdev,
-			    sizeof(msg.dev));
 			(void)pthread_mutex_lock(&ipcsockmtx);
 			(void)send(ipc, &msg, sizeof(msg), MSG_EOR);
 			(void)pthread_mutex_unlock(&ipcsockmtx);
@@ -1081,6 +1137,7 @@ media_changed()
 	static struct devlist_s *ep = NULL, *tmp = NULL;
 
 	SLIST_FOREACH_FROM_SAFE(ep, &pollq, next, tmp) {
+		warnx("CHECKING WHETHER %s HAS MEDIA", ep->devp->dev);
 		switch (ep->devp->iface->type) {
 		case IF_TYPE_DA:
 		case IF_TYPE_CD:
@@ -1113,6 +1170,10 @@ update_device(sdev_t *devp)
 {
 	char *p;
 
+	if (devp->iface->type == IF_TYPE_CD) {
+		warnx("REMOVING %s FROM POLLQUEUE", devp->dev);
+		del_from_pollqueue(devp);
+	}
 	if (devp->has_media) {
 		/* Media inserted. */
 		free(devp->name); devp->name = NULL;
@@ -2535,7 +2596,7 @@ add_device(const char *devname)
 		p = strchr(devname, '\0') - 1;
 		if (strchr("abcdefgh", *p) != NULL)
 			return (NULL);
-		dev.polling = true;
+		dev.polling = false;
 	} 
 	if (dev.iface->type == IF_TYPE_LVM) {
 		realdev = get_lvm_dev(devname);
@@ -3020,6 +3081,7 @@ eject_media(client_t *cli, sdev_t *devp, bool force)
 			 */
 			devp->visible	= false;
 			devp->has_media = false;
+			del_from_pollqueue(devp);
 			notifybc(devp, false);
 		}
 	}
