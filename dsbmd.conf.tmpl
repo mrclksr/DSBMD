@@ -24,23 +24,10 @@
 #	In dsbmd.conf:
 #	ntfs_mount_cmd = /path/to/ntfs_mount_rw
 ##############################################################################
-cfgversion = 1004
+cfgversion = 1005
 
 # Define filesystem kernel modules to load at DSBMD startup.
-preload_kmods =  ufs, msdosfs, cd9660, ext2fs, fuse, geom_linux_lvm
-
-# poll_exceptions - A comma separated list of shell-style patterns which
-# match devices that should NOT be polled. If a pattern contains whitespaces,
-# it must be enclosed in double quotes (``"´´). Wildcards must be escaped by
-# a backslash (``\´´) in order to be treated as regular characters.
-#
-# My Sansa Clip+, for instance, disappears from the CAM device list and/or be-
-# gins to hang after a certain amount of time if polling is enabled.
-# poll_exceptions = "*Sansa Clip+*", "foo bar*"
-
-# poll_interval - Time interval in seconds devices should be polled. I
-# think 5 sec. is sane. If set to 0 polling is disabled.
-poll_interval = 5
+preload_kmods = ufs, msdosfs, cd9660, ext2fs, fuse, geom_linux_lvm
 
 # Time interval in seconds between checking the mount table for changes.
 mntchk_interval = 1
