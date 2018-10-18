@@ -196,7 +196,7 @@ struct devdevent_s {
 	char *type;	  /* Event type: CREATE, DESTROY. */
 	char *cdev;	  /* Device name. */
 	char *device;	  /* Device name (system == CAM) */
-	char *scsi_sense; /* SCSI sense code */
+	char *scsi_sense; /* SCSI sense data */
 } devdevent;
 
 static const char *glblprfx[NGLBLPRFX] = GLBLPRFX;
@@ -1011,7 +1011,7 @@ devd_thr(void *ipcsock)
 			(void)pthread_mutex_lock(&ipcsockmtx);
 			(void)send(ipc, &msg, sizeof(msg), MSG_EOR);
 			(void)pthread_mutex_unlock(&ipcsockmtx);
-		} else  if (error == SOCK_ERR_CONN_CLOSED) {
+		} else if (error == SOCK_ERR_CONN_CLOSED) {
 			/* Lost connection to devd. */
 			(void)close(devd);
 			logprintx("Lost connection to devd. Reconnecting ...");
@@ -1170,10 +1170,9 @@ update_device(sdev_t *devp)
 {
 	char *p;
 
-	if (devp->iface->type == IF_TYPE_CD) {
-		warnx("REMOVING %s FROM POLLQUEUE", devp->dev);
-		del_from_pollqueue(devp);
-	}
+	warnx("REMOVING %s FROM POLLQUEUE", devp->dev);
+	del_from_pollqueue(devp);
+
 	if (devp->has_media) {
 		/* Media inserted. */
 		free(devp->name); devp->name = NULL;
