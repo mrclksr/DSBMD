@@ -2350,9 +2350,9 @@ get_da_storage_type(const char *devname)
 		cam_close_device(cd);
 		return (ST_HDD);
 	}
-	cam_close_device(cd);
 	(void)snprintf(var, sizeof(var) - 1, "dev.umass.%d.%%location",
 	    cd->sim_unit_number);
+	cam_close_device(cd);
 	sz = sizeof(buf) - 1;
 	if (sysctlbyname(var, buf, &sz, NULL, 0) == -1) {
 		logprint("sysctlbyname(%s)", var);
