@@ -86,7 +86,7 @@ dsbcfg_vardef_t vardefs[] = {
 { "procmaxwait",	   DSBCFG_VAR_INTEGER, CFG_PROCMAXWAIT,     VAL(10)  },
 { "cdrspeed",	           DSBCFG_VAR_INTEGER, CFG_CDRSPEED,	    VAL(16)  },
 { "max_clients",           DSBCFG_VAR_INTEGER, CFG_MAX_CLIENTS,     VAL(10)  },
-{ "poll_interval",         DSBCFG_VAR_INTEGER, CFG_POLL_INTERVAL,   VAL(5)   },
+{ "poll_interval",         DSBCFG_VAR_INTEGER, CFG_POLL_INTERVAL,   VAL(-1)  },
 { "mntchk_interval",       DSBCFG_VAR_INTEGER, CFG_MNTCHK_INTERVAL, VAL(1)   },
 { "usermount",		   DSBCFG_VAR_BOOLEAN, CFG_USERMOUNT,	    VAL(true)},
 { "poll_exceptions",       DSBCFG_VAR_STRINGS, CFG_POLL_EXCEPTIONS           },
@@ -103,25 +103,21 @@ check_cfg_version(dsbcfg_t *cfg)
 {
 
 	if (dsbcfg_getval(cfg, CFG_CFG_VERSION).integer < CFGVERSION) {
-		warnx("***********************************************"	\
-		      "******************");
-		warnx("WARNING");
-		warnx("");
+		HEADER();
 		warnx("Your dsbmd.conf seems to be outdated. Please " 	\
 		      "recreate it from");
 		warnx("dsbmd.conf.sample, or merge the files.");
-		warnx("");
-		warnx("***********************************************"	\
-		      "******************\n");
+		FOOTER();
 	}
 }
 
 void
 check_cfg_opts(dsbcfg_t *cfg)
 {
+	bool polliv, pollex;
 #if FREEBSD_VERSION >= 12
 	/* In case of FreeBSD >= 12 and msdosfs: remove the "large" option. */
-	bool large;
+	bool large = false;
 	char *p, *mopts;
 
 	mopts = dsbcfg_getval(cfg, CFG_MSDOSFS_OPTS).string;
@@ -139,17 +135,25 @@ check_cfg_opts(dsbcfg_t *cfg)
 
 	if (!large)
 		return;
-	warnx("*********************************************" \
-	    "********************");
-	warnx("WARNING");
-	warnx("");
+	HEADER();
 	warnx("Ignoring deprecated 'large' mount option for msdosfs.");
 	warnx("On FreeBSD >= 12 (as of r319735) this option was removed.");
 	warnx("");
 	warnx("Please adjust your dsbmd.conf.");
-	warnx("");
-	warnx("*********************************************" \
-	    "********************\n");
+	FOOTER();
 #endif
+	pollex = polliv = false;
+	if (dsbcfg_getval(cfg, CFG_POLL_EXCEPTIONS).strings != NULL)
+		pollex = true;
+	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer != -1)
+		polliv = true;
+	if (pollex || polliv) {
+		HEADER();
+		if (pollex)
+			warnx("Ignoring deprecated 'poll_exceptions' variable");
+		if (polliv)
+			warnx("Ignoring deprecated 'poll_interval' variable");
+		FOOTER();
+	}
 }
 
