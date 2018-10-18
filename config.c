@@ -30,6 +30,19 @@
 
 #define VAL(v)	DSBCFG_VAL(v)
 
+#define HEADER() do { \
+	warnx("***********************************************"	\
+	      "******************");				\
+	warnx("WARNING");					\
+	warnx("");						\
+} while (0)
+
+#define FOOTER() do {						\
+	warnx("");						\
+	warnx("***********************************************"	\
+	      "******************\n");				\
+} while (0)
+
 dsbcfg_vardef_t vardefs[] = {
 { "mount_dir",	           DSBCFG_VAR_STRING,  CFG_MNTDIR		     },
 { "cd9660_mount_cmd",      DSBCFG_VAR_STRING,  CFG_CD9660_MNTCMD	     },
