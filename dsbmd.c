@@ -999,7 +999,8 @@ devd_thr(void *ipcsock)
 			    strlen(SCSI_SENSE_NOT_PRESENT)) == 0) {
 				/* Media not present */
 				devp = lookup_dev(devdevent.device);
-				if (devp != NULL && devp->has_media) {
+				if (devp != NULL &&
+				    (devp->has_media || devp->in_pollq)) {
 					warnx("MEDIA NOT PRESENT");
 					warnx("SENDING MEDIA REMOVED MSG");
 					msg.type = MSGTYPE_MEDIA_REMOVED;
@@ -1026,11 +1027,12 @@ devd_thr(void *ipcsock)
 static void
 add_to_pollqueue(sdev_t *devp)
 {
-	size_t	    len;
 	pthread_t   tid;
 	const char *dev;
 	struct devlist_s *ep;
 
+	if (devp->in_pollq)
+		return;
 	dev = devbasename(devp->dev);
 	(void)pthread_mutex_lock(&pollqmtx);
 	if (match_part_dev(dev, 0)) {
@@ -1045,17 +1047,12 @@ add_to_pollqueue(sdev_t *devp)
 			die("pthread_create()");
 		(void)pthread_detach(tid);
 	}
-	len = strlen(devp->dev);
-	SLIST_FOREACH(ep, &pollq, next) {
-		if (strncmp(devp->dev, ep->devp->dev, len) == 0) {
-			(void)pthread_mutex_unlock(&pollqmtx);
-			return;
-		}
-	}
 	if ((ep = malloc(sizeof(struct devlist_s))) == NULL)
 		die("malloc()");
 	ep->devp = devp;
+	devp->in_pollq = true;
 	SLIST_INSERT_HEAD(&pollq, ep, next);
+	warnx("ADDED %s TO POLL QUEUE", devp->dev);
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
 
@@ -1064,6 +1061,8 @@ del_from_pollqueue(sdev_t *devp)
 {
 	struct devlist_s *ep;
 
+	if (!devp->in_pollq)
+		return;
 	(void)pthread_mutex_lock(&pollqmtx);
 	SLIST_FOREACH(ep, &pollq, next) {
 		if (devp == ep->devp)
@@ -1074,6 +1073,7 @@ del_from_pollqueue(sdev_t *devp)
 		return;
 	}
 	SLIST_REMOVE(&pollq, ep, devlist_s, next);
+	devp->in_pollq = false;
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
 
