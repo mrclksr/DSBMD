@@ -28,71 +28,69 @@
 #include "dsbcfg/dsbcfg.h"
 #include "config.h"
 
-#define VAL(v)	DSBCFG_VAL(v)
+#define VAL(v) DSBCFG_VAL(v)
 
 #define HEADER() do { \
-	warnx("***********************************************"	\
-	      "******************");				\
-	warnx("WARNING");					\
-	warnx("");						\
+	warnx(hl); warnx("WARNING"); warnx(""); \
 } while (0)
 
-#define FOOTER() do {						\
-	warnx("");						\
-	warnx("***********************************************"	\
-	      "******************\n");				\
+#define FOOTER() do { \
+	warnx(""); warnx("%s\n", hl); \
 } while (0)
+
+static const char hl[] = "***********************************************" \
+		  	 "******************";
 
 dsbcfg_vardef_t vardefs[] = {
-{ "mount_dir",	           DSBCFG_VAR_STRING,  CFG_MNTDIR		     },
-{ "cd9660_mount_cmd",      DSBCFG_VAR_STRING,  CFG_CD9660_MNTCMD	     },
-{ "msdosfs_mount_cmd",     DSBCFG_VAR_STRING,  CFG_MSDOSFS_MNTCMD	     },
-{ "ntfs_mount_cmd",        DSBCFG_VAR_STRING,  CFG_NTFS_MNTCMD		     },
-{ "hfsp_mount_cmd",        DSBCFG_VAR_STRING,  CFG_HFSP_MNTCMD		     },
-{ "ufs_mount_cmd",         DSBCFG_VAR_STRING,  CFG_UFS_MNTCMD		     },
-{ "ext_mount_cmd",         DSBCFG_VAR_STRING,  CFG_EXT_MNTCMD		     },
-{ "ext4_mount_cmd",        DSBCFG_VAR_STRING,  CFG_EXT4_MNTCMD		     },
-{ "exfat_mount_cmd",       DSBCFG_VAR_STRING,  CFG_EXFAT_MNTCMD		     },
-{ "mtpfs_mount_cmd",       DSBCFG_VAR_STRING,  CFG_MTPFS_MNTCMD		     },
+{ "mount_dir",		   DSBCFG_VAR_STRING,  CFG_MNTDIR		     },
+{ "cd9660_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_CD9660_MNTCMD	     },
+{ "msdosfs_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_MSDOSFS_MNTCMD	     },
+{ "ntfs_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_NTFS_MNTCMD		     },
+{ "hfsp_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_HFSP_MNTCMD		     },
+{ "ufs_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_UFS_MNTCMD		     },
+{ "ext_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_EXT_MNTCMD		     },
+{ "ext4_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_EXT4_MNTCMD		     },
+{ "exfat_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_EXFAT_MNTCMD		     },
+{ "mtpfs_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_MTPFS_MNTCMD		     },
 { "ptpfs_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_PTPFS_MNTCMD		     },
 { "xfs_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_XFS_MNTCMD		     },
 { "btrfs_mount_cmd",	   DSBCFG_VAR_STRING,  CFG_BTRFS_MNTCMD		     },
 { "cd9660_mount_cmd_usr",  DSBCFG_VAR_STRING,  CFG_CD9660_MNTCMD_U	     },
 { "msdosfs_mount_cmd_usr", DSBCFG_VAR_STRING,  CFG_MSDOSFS_MNTCMD_U	     },
-{ "ntfs_mount_cmd_usr",    DSBCFG_VAR_STRING,  CFG_NTFS_MNTCMD_U	     },
-{ "hfsp_mount_cmd_usr",    DSBCFG_VAR_STRING,  CFG_HFSP_MNTCMD_U	     },
-{ "ufs_mount_cmd_usr",     DSBCFG_VAR_STRING,  CFG_UFS_MNTCMD_U     	     },
-{ "ext_mount_cmd_usr",     DSBCFG_VAR_STRING,  CFG_EXT_MNTCMD_U     	     },
-{ "ext4_mount_cmd_usr",    DSBCFG_VAR_STRING,  CFG_EXT4_MNTCMD_U     	     },
+{ "ntfs_mount_cmd_usr",	   DSBCFG_VAR_STRING,  CFG_NTFS_MNTCMD_U	     },
+{ "hfsp_mount_cmd_usr",	   DSBCFG_VAR_STRING,  CFG_HFSP_MNTCMD_U	     },
+{ "ufs_mount_cmd_usr",	   DSBCFG_VAR_STRING,  CFG_UFS_MNTCMD_U     	     },
+{ "ext_mount_cmd_usr",	   DSBCFG_VAR_STRING,  CFG_EXT_MNTCMD_U     	     },
+{ "ext4_mount_cmd_usr",	   DSBCFG_VAR_STRING,  CFG_EXT4_MNTCMD_U     	     },
 { "exfat_mount_cmd_usr",   DSBCFG_VAR_STRING,  CFG_EXFAT_MNTCMD_U   	     },
 { "mtpfs_mount_cmd_usr",   DSBCFG_VAR_STRING,  CFG_MTPFS_MNTCMD_U   	     },
 { "ptpfs_mount_cmd_usr",   DSBCFG_VAR_STRING,  CFG_PTPFS_MNTCMD_U   	     },
 { "xfs_mount_cmd_usr",	   DSBCFG_VAR_STRING,  CFG_XFS_MNTCMD_U		     },
 { "btrfs_mount_cmd_usr",   DSBCFG_VAR_STRING,  CFG_BTRFS_MNTCMD_U	     },
-{ "cd9660_opts",           DSBCFG_VAR_STRING,  CFG_CD9660_OPTS	     	     },
-{ "msdosfs_opts",          DSBCFG_VAR_STRING,  CFG_MSDOSFS_OPTS     	     },
-{ "msdosfs_locale",        DSBCFG_VAR_STRING,  CFG_MSDOSFS_LOCALE   	     },
-{ "hfsp_opts",             DSBCFG_VAR_STRING,  CFG_HFSP_OPTS	     	     },
-{ "ntfs_opts",             DSBCFG_VAR_STRING,  CFG_NTFS_OPTS	     	     },
-{ "ufs_opts",	           DSBCFG_VAR_STRING,  CFG_UFS_OPTS	     	     },
-{ "ext_opts",              DSBCFG_VAR_STRING,  CFG_EXT_OPTS	     	     },
-{ "ext4_opts",             DSBCFG_VAR_STRING,  CFG_EXT4_OPTS	     	     },
-{ "exfat_opts",            DSBCFG_VAR_STRING,  CFG_EXFAT_OPTS	     	     },
-{ "mtpfs_opts",            DSBCFG_VAR_STRING,  CFG_MTPFS_OPTS	     	     },
-{ "ptpfs_opts",            DSBCFG_VAR_STRING,  CFG_PTPFS_OPTS	     	     },
-{ "xfs_opts",              DSBCFG_VAR_STRING,  CFG_XFS_OPTS	     	     },
-{ "btrfs_opts",            DSBCFG_VAR_STRING,  CFG_BTRFS_OPTS	     	     },
+{ "cd9660_opts",	   DSBCFG_VAR_STRING,  CFG_CD9660_OPTS	     	     },
+{ "msdosfs_opts",	   DSBCFG_VAR_STRING,  CFG_MSDOSFS_OPTS     	     },
+{ "msdosfs_locale",	   DSBCFG_VAR_STRING,  CFG_MSDOSFS_LOCALE   	     },
+{ "hfsp_opts",		   DSBCFG_VAR_STRING,  CFG_HFSP_OPTS	     	     },
+{ "ntfs_opts",		   DSBCFG_VAR_STRING,  CFG_NTFS_OPTS	     	     },
+{ "ufs_opts",		   DSBCFG_VAR_STRING,  CFG_UFS_OPTS	     	     },
+{ "ext_opts",		   DSBCFG_VAR_STRING,  CFG_EXT_OPTS	     	     },
+{ "ext4_opts",		   DSBCFG_VAR_STRING,  CFG_EXT4_OPTS	     	     },
+{ "exfat_opts",		   DSBCFG_VAR_STRING,  CFG_EXFAT_OPTS	     	     },
+{ "mtpfs_opts",		   DSBCFG_VAR_STRING,  CFG_MTPFS_OPTS	     	     },
+{ "ptpfs_opts",		   DSBCFG_VAR_STRING,  CFG_PTPFS_OPTS	     	     },
+{ "xfs_opts",		   DSBCFG_VAR_STRING,  CFG_XFS_OPTS	     	     },
+{ "btrfs_opts",		   DSBCFG_VAR_STRING,  CFG_BTRFS_OPTS	     	     },
 { "unmount_on_exit",	   DSBCFG_VAR_STRING,  CFG_UNMOUNT_ON_EXIT, VAL("no")},
 { "procmaxwait",	   DSBCFG_VAR_INTEGER, CFG_PROCMAXWAIT,     VAL(10)  },
-{ "cdrspeed",	           DSBCFG_VAR_INTEGER, CFG_CDRSPEED,	    VAL(16)  },
-{ "max_clients",           DSBCFG_VAR_INTEGER, CFG_MAX_CLIENTS,     VAL(10)  },
-{ "poll_interval",         DSBCFG_VAR_INTEGER, CFG_POLL_INTERVAL,   VAL(-1)  },
-{ "mntchk_interval",       DSBCFG_VAR_INTEGER, CFG_MNTCHK_INTERVAL, VAL(1)   },
+{ "cdrspeed",		   DSBCFG_VAR_INTEGER, CFG_CDRSPEED,	    VAL(16)  },
+{ "max_clients",	   DSBCFG_VAR_INTEGER, CFG_MAX_CLIENTS,     VAL(10)  },
+{ "poll_interval",	   DSBCFG_VAR_INTEGER, CFG_POLL_INTERVAL,   VAL(-1)  },
+{ "mntchk_interval",	   DSBCFG_VAR_INTEGER, CFG_MNTCHK_INTERVAL, VAL(1)   },
 { "usermount",		   DSBCFG_VAR_BOOLEAN, CFG_USERMOUNT,	    VAL(true)},
-{ "poll_exceptions",       DSBCFG_VAR_STRINGS, CFG_POLL_EXCEPTIONS           },
-{ "allow_users",           DSBCFG_VAR_STRINGS, CFG_ALLOW_USERS	      	     },
-{ "allow_groups",          DSBCFG_VAR_STRINGS, CFG_ALLOW_GROUPS		     },
-{ "preload_kmods",         DSBCFG_VAR_STRINGS, CFG_PRELOAD_KMODS	     },
+{ "poll_exceptions",	   DSBCFG_VAR_STRINGS, CFG_POLL_EXCEPTIONS           },
+{ "allow_users",	   DSBCFG_VAR_STRINGS, CFG_ALLOW_USERS	      	     },
+{ "allow_groups",	   DSBCFG_VAR_STRINGS, CFG_ALLOW_GROUPS		     },
+{ "preload_kmods",	   DSBCFG_VAR_STRINGS, CFG_PRELOAD_KMODS	     },
 { "cfgversion",		   DSBCFG_VAR_INTEGER, CFG_CFG_VERSION,	    VAL(0)   }
 };
 
