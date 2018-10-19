@@ -116,6 +116,7 @@ typedef struct sdev_s {
 	bool	      cmd_mounted;	  /* Mounted using ext. cmd */
 	bool	      dsbmd_mounted;	  /* Mounted through dsbmd. */
 	bool	      has_media;
+	bool	      in_pollq;		  /* Whether dev is in poll queue. */
 	bool	      visible;		  /* Visible to client? */
 	bool	      ejectable;
 	char	      *name;		  /* Volume ID */
