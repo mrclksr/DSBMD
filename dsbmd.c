@@ -259,7 +259,7 @@ enum {
 	MSGTYPE_CHECK_FOR_MEDIA, MSGTYPE_MEDIA_REMOVED
 };
 
-static int	ipcsv[2];
+static int	ipcsv[2];		/* IPC socket pair for threads. */
 static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
 static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
 static dsbcfg_t	*cfg	      = NULL;
@@ -561,7 +561,6 @@ main(int argc, char *argv[])
 				break;
 			case MSGTYPE_CHECK_FOR_MEDIA:
 				add_to_pollqueue(msg.devp);
-				warnx("ADDING %s TO POLLQUEUE", msg.devp->dev);
 				break;
 			case MSGTYPE_MEDIA_REMOVED:
 				msg.devp->has_media = false;
@@ -931,7 +930,6 @@ poll_thr(void *socket)
 		(void)pthread_mutex_lock(&pollqmtx);
 		if (SLIST_EMPTY(&pollq)) {
 			/* Queue empty. Terminate thread */
-			warnx("QUEUE EMPTY. TERMINATING THREAD");
 			(void)pthread_mutex_unlock(&pollqmtx);
 			pthread_exit(NULL);
 		}
@@ -988,8 +986,6 @@ devd_thr(void *ipcsock)
 				/* Media becoming ready */
 				devp = lookup_dev(devdevent.device);
 				if (devp != NULL && !devp->has_media) {
-					warnx("MEDIA BECOMING READY");
-					warnx("SENDING CHECK_FOR_MEDIA MSG");
 					msg.type = MSGTYPE_CHECK_FOR_MEDIA;
 					msg.devp = devp;
 				} else
@@ -1001,8 +997,6 @@ devd_thr(void *ipcsock)
 				devp = lookup_dev(devdevent.device);
 				if (devp != NULL &&
 				    (devp->has_media || devp->in_pollq)) {
-					warnx("MEDIA NOT PRESENT");
-					warnx("SENDING MEDIA REMOVED MSG");
 					msg.type = MSGTYPE_MEDIA_REMOVED;
 					msg.devp = devp;
 				} else
@@ -1042,7 +1036,6 @@ add_to_pollqueue(sdev_t *devp)
 	}
 	if (SLIST_EMPTY(&pollq)) {
 		/* Start poll thread */
-		warnx("QUEUE EMPTY. STARTING THREAD");
 		if (pthread_create(&tid, NULL, poll_thr, &ipcsv[1]) != 0)
 			die("pthread_create()");
 		(void)pthread_detach(tid);
@@ -1052,7 +1045,6 @@ add_to_pollqueue(sdev_t *devp)
 	ep->devp = devp;
 	devp->in_pollq = true;
 	SLIST_INSERT_HEAD(&pollq, ep, next);
-	warnx("ADDED %s TO POLL QUEUE", devp->dev);
 	(void)pthread_mutex_unlock(&pollqmtx);
 }
 
@@ -1137,7 +1129,6 @@ media_changed()
 	static struct devlist_s *ep = NULL, *tmp = NULL;
 
 	SLIST_FOREACH_FROM_SAFE(ep, &pollq, next, tmp) {
-		warnx("CHECKING WHETHER %s HAS MEDIA", ep->devp->dev);
 		switch (ep->devp->iface->type) {
 		case IF_TYPE_DA:
 		case IF_TYPE_CD:
@@ -1170,7 +1161,6 @@ update_device(sdev_t *devp)
 {
 	char *p;
 
-	warnx("REMOVING %s FROM POLLQUEUE", devp->dev);
 	del_from_pollqueue(devp);
 
 	if (devp->has_media) {
