@@ -128,6 +128,7 @@ static int	detach_mddev(sdev_t *);
 static int	send_string(int, const char *);
 static int	client_readln(client_t *, int *);
 static int	serve_client(client_t *);
+static int	strtoargv(char *, char **, size_t, size_t *);
 static bool	match_part_dev(const char *, size_t);
 static bool	match_glabel(sdev_t *, const char *);
 static bool	has_media(const char *);
@@ -3361,21 +3362,68 @@ serve_client(client_t *cli)
 	return (-1);
 }
 
+static int
+strtoargv(char *str, char **argv, size_t argvsz, size_t *argc)
+{
+	int    quote, esc;
+	char   *start;
+	size_t n;
+
+	while (isspace(*str))
+		str++;
+	quote = n = esc = 0; start = str;
+	for (; n < argvsz && *str != '\0'; str++) {
+		if (*str == '"') {
+			if (esc) {
+				esc ^= 1;
+			} else {
+				quote ^= 1;
+				(void)memmove(str, str + 1, strlen(str));
+				str--;
+			}
+		} else if (*str == '\\') {
+			if (!esc) {
+				(void)memmove(str, str + 1, strlen(str));
+				str--;
+			}
+			esc ^= 1;
+		} else if (isspace(*str)) {
+			if (esc) {
+				esc ^= 1;
+			} else if (!quote) {
+				*str = '\0';
+				while (isspace(str[1]))
+					str++;
+				argv[n++] = start; start = str + 1;
+			}
+		}
+	}
+	if (quote || esc)
+		return (-1);
+	if (str != start && n < argvsz)
+		argv[n++] = start;
+	*argc = n;
+
+	return (0);
+}
+
 static void
 exec_cmd(client_t *cli, char *cmdstr)
 {
-	int  argc, i;
-	char *p, *last, *argv[12];
+	int    i;
+	char   *argv[12];
+	size_t argc;
 	struct command_s *cp;
 
+	(void)strtok(cmdstr, "\r\n");
 	if (strlen(cmdstr) == 0) {
 		/* Ignore empty strings */
 		return;
 	}
-	for (p = strtok_r(cmdstr, "\t\n\r ", &last), argc = 0;
-	    argc < sizeof(argv) / sizeof(char *) && p != NULL; argc++) {
-		argv[argc] = p;
-		p = strtok_r(NULL, "\t\n\r ", &last);
+	if (strtoargv(cmdstr, argv, sizeof(argv) / sizeof(char *) - 1,
+	    &argc) == -1) {
+		cliprint(cli, "E:code=%d", ERR_SYNTAX_ERROR);
+		return;
 	}
 	argv[argc] = NULL;
 	for (cp = NULL, i = 0; cp == NULL && i < NCOMMANDS; i++) {
