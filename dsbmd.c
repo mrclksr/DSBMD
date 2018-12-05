@@ -1584,14 +1584,16 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 		return (-1);
 	}
 	locale = kiconv_quirkcs(cs + 1, KICONV_VENDOR_MICSFT);
+	if (kiconv_add_xlat16_cspair(locale, locale,
+	    KICONV_FROM_UPPER | KICONV_LOWER) != 0) {
+		logprint("kiconv_add_xlat16_cspair()");
+		return (-1);
+	}
 	if (extend_iovec(iov, iovlen, "cs_win", ENCODING_UNICODE) == -1 ||
 	    extend_iovec(iov, iovlen, "cs_local", locale) == -1		||
 	    extend_iovec(iov, iovlen, "cs_dos", locale) == -1		||
 	    extend_iovec(iov, iovlen, "kiconv", "") == -1)
 		die("extend_iovec()");
-	(void)kiconv_add_xlat16_cspair(locale, locale,
-	    KICONV_FROM_UPPER | KICONV_LOWER);
-
 	return (0);
 }
 
