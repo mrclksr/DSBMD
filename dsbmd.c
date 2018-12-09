@@ -116,11 +116,9 @@ static int	mymount(const char *, const char *, const char *,
 static int	mount_device(client_t *, sdev_t *);
 static int	unmount_device(client_t *, sdev_t *, bool, bool);
 static int	exec_mntcmd(client_t *, sdev_t *, char *);
-static int	extend_iovec(struct iovec **, int *, const char *,
-		    const char *);
 static int	eject_media(client_t *, sdev_t *, bool);
 static int	set_cdrspeed(client_t *, sdev_t *, int);
-static int	set_msdosfs_locale(const char *, struct iovec**, int *);
+static int	set_msdosfs_locale(const char *, struct iovec**, size_t *);
 static int	uconnect(const char *);
 static int	devd_connect(void);
 static int	attach_mddev(client_t *, const char *);
@@ -178,6 +176,9 @@ static void	cliprintbc(client_t *, const char *, ...);
 static void	check_mntbl(struct statfs *, int);
 static void	check_fuse_mount(struct statfs *, int);
 static void	check_fuse_unmount(struct statfs *, int);
+static void	add_errbuf(struct iovec **, size_t *, char **, size_t);
+static void	extend_iovec(struct iovec **, size_t *, const char *,
+		    const char *);
 static time_t	poll_mntbl(void);
 static sdev_t	*add_device(const char *);
 static sdev_t	*add_ptp_device(const char *);
@@ -1369,43 +1370,63 @@ is_mountable(const char *dev)
 
 /*
  * Extends the given iovec list with the name-val pair, and terminates the list
- * with a NULL pointer. The new list lenght (old lenght + 2) will be returned.
+ * with a NULL pointer.
  */
-static int
-extend_iovec(struct iovec **iov, int *iovlen, const char *name, const char *val)
+static void
+extend_iovec(struct iovec **iov, size_t *iovlen, const char *name,
+	const char *val)
 {
-	int	     n;
+	size_t	     n;
 	struct iovec *v;
 
 	n = *iovlen + 2 + 1;
-
 	if ((v = realloc(*iov, sizeof(struct iovec) * n)) == NULL)
-		return (-1);
+		die("realloc()");
 	if ((v[n - 3].iov_base = strdup(name)) == NULL)
-		return (-1);
+		die("strdup()");
 	v[n - 3].iov_len  = strlen(name) + 1;
 	if ((v[n - 2].iov_base = strdup(val)) == NULL)
-		return (-1);
+		die("strdup()");
 	v[n - 2].iov_len  = strlen(val) + 1;
 	/* Mark end of array */
 	v[n - 1].iov_base = NULL;
 
 	*iov	= v;
 	*iovlen = n - 1;
+}
 
- 	return (*iovlen);
+static void
+add_errbuf(struct iovec **iov, size_t *iovlen, char **errbuf, size_t len)
+{
+	size_t	     n;
+	struct iovec *v;
+
+	n = *iovlen + 2 + 1;
+	if ((*errbuf = malloc(len)) == NULL)
+		die("malloc()");
+	bzero(*errbuf, len);
+	if ((v = realloc(*iov, sizeof(struct iovec) * n)) == NULL)
+		die("realloc()");
+	if ((v[n - 3].iov_base = strdup("errmsg")) == NULL)
+		die("strdup()");
+	v[n - 3].iov_len  = strlen("errmsg") + 1;
+	v[n - 2].iov_base = *errbuf;
+	v[n - 2].iov_len  = len;
+	/* Mark end of array */
+	v[n - 1].iov_base = NULL;
+
+	*iov	= v;
+	*iovlen = n - 1;
 }
 
 static void
 free_iovec(struct iovec *iov)
 {
-	int i, saved_errno;
+	int i;
 
-	saved_errno = errno;
 	for (i = 0; iov[i].iov_base != NULL; i++)
 		free(iov[i].iov_base);
 	free(iov);
-	errno = saved_errno;
 }
 
 /*
@@ -1565,7 +1586,7 @@ ssystem(uid_t uid, const char *cmd)
 }
 
 static int
-set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
+set_msdosfs_locale(const char *locale, struct iovec **iov, size_t *iovlen)
 {
 	const char *cs;
 
@@ -1589,27 +1610,28 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, int *iovlen)
 		logprint("kiconv_add_xlat16_cspair()");
 		return (-1);
 	}
-	if (extend_iovec(iov, iovlen, "cs_win", ENCODING_UNICODE) == -1 ||
-	    extend_iovec(iov, iovlen, "cs_local", locale) == -1		||
-	    extend_iovec(iov, iovlen, "cs_dos", locale) == -1		||
-	    extend_iovec(iov, iovlen, "kiconv", "") == -1)
-		die("extend_iovec()");
+	extend_iovec(iov, iovlen, "cs_win", ENCODING_UNICODE);
+	extend_iovec(iov, iovlen, "cs_local", locale);
+	extend_iovec(iov, iovlen, "cs_dos", locale);
+	extend_iovec(iov, iovlen, "kiconv", "");
+
 	return (0);
 }
+
 
 static int
 mymount(const char *fs, const char *dir, const char *dev, const char *opts,
 	uid_t uid, gid_t gid)
 {
-	int	     iovlen, ret;
-	char	     *p, *op, *q;
+	int	     ret, saved_errno;
+	char	     *p, *op, *q, *errmsg;
+	size_t	     iovlen;
 	struct iovec *iov;
 
 	iov = NULL; iovlen = 0;
-	if (extend_iovec(&iov, &iovlen, "fstype", fs) == -1  ||
-	    extend_iovec(&iov, &iovlen, "fspath", dir) == -1 ||
-	    extend_iovec(&iov, &iovlen, "from", dev) == -1) 
-		die("extend_iovec()");
+	extend_iovec(&iov, &iovlen, "fstype", fs);
+	extend_iovec(&iov, &iovlen, "fspath", dir);
+	extend_iovec(&iov, &iovlen, "from", dev);
 	if (opts != NULL) {
 		if ((op = strdup(opts)) == NULL)
 			die("strdup()");
@@ -1618,8 +1640,7 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts,
 				q = "";
 			else
 				*q++ = '\0';
-			if (extend_iovec(&iov, &iovlen, p, q) == -1)
-				die("extend_iovec()");
+			extend_iovec(&iov, &iovlen, p, q);
 		}
 		free(op);
 	}
@@ -1630,14 +1651,19 @@ mymount(const char *fs, const char *dir, const char *dev, const char *opts,
 		    &iov, &iovlen) == -1)
 			logprintx("set_msdosfs_locale() failed.");
 	}
+	add_errbuf(&iov, &iovlen, &errmsg, 1024);
 	errno = 0;
 
 	/* Mount as user if "usermount" and vfs.usermount is set */
 	if (dsbcfg_getval(cfg, CFG_USERMOUNT).boolean && usermount_set())
 		switcheids(uid, gid);
 	ret = nmount(iov, iovlen, 0);
+	saved_errno = errno;
+	if (ret != 0 && errmsg[0] != '\0')
+		logprint("nmount(): %s", errmsg);
 	restoreids();
 	free_iovec(iov);
+	errno = saved_errno;
 
 	return (ret);
 }
