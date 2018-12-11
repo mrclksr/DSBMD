@@ -557,6 +557,16 @@ main(int argc, char *argv[])
 				 */
 				if (devp->iface->type != IF_TYPE_CD)
 					del_device(devp);
+				else {
+					/*
+					 * In case of a cd device, mark the
+					 * media removed.
+					 */
+					if (devp->has_media) {
+						devp->has_media = false;
+						update_device(devp);
+					}
+				}
 				break;
 			case MSGTYPE_UPDATE_DEVICE:
 				update_device(msg.devp);
