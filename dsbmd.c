@@ -2685,6 +2685,7 @@ add_device(const char *devname)
 	devp->realdev     = dev.realdev;
 	devp->has_media   = dev.has_media;
 	devp->visible	  = false;
+	devp->in_pollq	  = false;
 	devp->ejectable   = dev.ejectable;
 	devp->cmd_mounted = false;
 	devp->dsbmd_mounted = false;
