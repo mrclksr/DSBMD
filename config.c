@@ -82,6 +82,7 @@ dsbcfg_vardef_t vardefs[] = {
 { "btrfs_opts",		   DSBCFG_VAR_STRING,  CFG_BTRFS_OPTS	     	     },
 { "unmount_on_exit",	   DSBCFG_VAR_STRING,  CFG_UNMOUNT_ON_EXIT, VAL("no")},
 { "procmaxwait",	   DSBCFG_VAR_INTEGER, CFG_PROCMAXWAIT,     VAL(10)  },
+{ "cmdmaxwait",		   DSBCFG_VAR_INTEGER, CFG_CMDMAXWAIT,      VAL(10)  },
 { "cdrspeed",		   DSBCFG_VAR_INTEGER, CFG_CDRSPEED,	    VAL(16)  },
 { "max_clients",	   DSBCFG_VAR_INTEGER, CFG_MAX_CLIENTS,     VAL(10)  },
 { "poll_interval",	   DSBCFG_VAR_INTEGER, CFG_POLL_INTERVAL,   VAL(-1)  },
