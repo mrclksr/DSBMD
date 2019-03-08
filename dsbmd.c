@@ -47,6 +47,7 @@
 #include <paths.h>
 #include <pthread.h>
 #include <pwd.h>
+#include <setjmp.h>
 #include <regex.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -264,6 +265,7 @@ enum {
 static int	ipcsv[2];		/* IPC socket pair for threads. */
 static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
 static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
+static jmp_buf  jmpenv;
 static dsbcfg_t	*cfg	      = NULL;
 static struct pidfh *pfh      = NULL;	/* PID file handle. */
 static pthread_mutex_t pollqmtx;
@@ -3447,12 +3449,23 @@ strtoargv(char *str, char **argv, size_t argvsz, size_t *argc)
 }
 
 static void
+catch_cmd_timout(int signo)
+{
+	struct itimerval itmval;
+
+	(void)getitimer(ITIMER_REAL, &itmval);
+	if (itmval.it_value.tv_sec == 0)
+		longjmp(jmpenv, 1);
+}
+
+static void
 exec_cmd(client_t *cli, char *cmdstr)
 {
 	int    i;
 	char   *argv[12];
 	size_t argc;
 	struct command_s *cp;
+	struct itimerval itmval = { { 0, 0}, {0, 0} };
 
 	(void)strtok(cmdstr, "\r\n");
 	if (strlen(cmdstr) == 0) {
@@ -3472,8 +3485,22 @@ exec_cmd(client_t *cli, char *cmdstr)
 	if (cp == NULL) {
 		cliprint(cli, "E:command=%s:code=%d", argv[0],
 		    ERR_UNKNOWN_COMMAND);
-	} else
+	} else {
+		if (setjmp(jmpenv) != 0) {
+			cliprint(cli, "E:command=%s:code=%d", argv[0],
+			    ERR_TIMEOUT);
+			(void)signal(SIGALRM, SIG_IGN);
+			return;
+		}
+		itmval.it_value.tv_sec = dsbcfg_getval(cfg, CFG_CMDMAXWAIT).integer;
+		(void)setitimer(ITIMER_REAL, &itmval, NULL);
+		(void)signal(SIGALRM, catch_cmd_timout);
 		cp->cmdf(cli, argv + 1);
+		/* Stop timer */
+		itmval.it_value.tv_sec  = 0;
+		itmval.it_value.tv_usec = 0;
+		(void)setitimer(ITIMER_REAL, &itmval, NULL);
+	}
 }
 
 static void
