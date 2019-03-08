@@ -439,6 +439,7 @@ main(int argc, char *argv[])
 	(void)signal(SIGQUIT, cleanup);
 	(void)signal(SIGHUP, cleanup);
 	(void)signal(SIGPIPE, SIG_IGN);
+	(void)signal(SIGALRM, SIG_IGN);
 
 	logprintx("%s started", PROGRAM);
 
