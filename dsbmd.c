@@ -3501,6 +3501,7 @@ exec_cmd(client_t *cli, char *cmdstr)
 		itmval.it_value.tv_sec  = 0;
 		itmval.it_value.tv_usec = 0;
 		(void)setitimer(ITIMER_REAL, &itmval, NULL);
+		(void)signal(SIGALRM, SIG_IGN);
 	}
 }
 
