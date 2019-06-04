@@ -100,6 +100,10 @@
 	logprint(msg, ##__VA_ARGS__); exit(EXIT_FAILURE); \
 } while (0)
 
+#define DEBUG(msg, ...) do { \
+	fprintf(stderr, "DEBUG: "msg"\n", ##__VA_ARGS__); \
+} while(0)
+
 #define INITFS(i, ID) do {						     \
 	fstype[i].mntcmd   = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD).string;   \
 	fstype[i].mntcmd_u = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD_U).string; \
@@ -889,8 +893,10 @@ read_devd_event(int s, int *error)
 		if (msg.msg_flags & MSG_TRUNC) {
 			logprint("recvmsg(): Message truncated");
 			return (rd > 0 ? lnbuf : NULL);
-		} else if (msg.msg_flags & MSG_EOR)
+		} else if (msg.msg_flags & MSG_EOR) {
+			DEBUG("devd: %s", lnbuf);
 			return (lnbuf);
+		}
 	}
 	return (NULL);
 }
@@ -939,16 +945,18 @@ poll_thr(void *socket)
 	int	s;
 	sdev_t *devp;
 	struct ipcmsg_s msg;
-
+	DEBUG("Entering poll thread");
  	s = *(int *)socket;
 	for (;; sleep(3)) {
 		(void)pthread_mutex_lock(&pollqmtx);
 		if (SLIST_EMPTY(&pollq)) {
 			/* Queue empty. Terminate thread */
+			DEBUG("Poll queue empty. Exit from thread.");
 			(void)pthread_mutex_unlock(&pollqmtx);
 			pthread_exit(NULL);
 		}
 		while ((devp = media_changed()) != NULL) {
+			DEBUG("Poll thread: media_changed() -> %s", devp->dev);
 			msg.type = MSGTYPE_UPDATE_DEVICE;
 			msg.devp = devp;
 			(void)pthread_mutex_lock(&ipcsockmtx);
@@ -999,6 +1007,7 @@ devd_thr(void *ipcsock)
 			    SCSI_SENSE_BECOMING_READY,
 			    strlen(SCSI_SENSE_BECOMING_READY)) == 0) {
 				/* Media becoming ready */
+				DEBUG("Media becoming ready.");
 				devp = lookup_dev(devdevent.device);
 				if (devp != NULL && !devp->has_media) {
 					msg.type = MSGTYPE_CHECK_FOR_MEDIA;
@@ -1009,6 +1018,7 @@ devd_thr(void *ipcsock)
 			    SCSI_SENSE_NOT_PRESENT,
 			    strlen(SCSI_SENSE_NOT_PRESENT)) == 0) {
 				/* Media not present */
+				DEBUG("Media not present");
 				devp = lookup_dev(devdevent.device);
 				if (devp != NULL &&
 				    (devp->has_media || devp->in_pollq)) {
@@ -1115,6 +1125,7 @@ scsi_has_media(const char *dev)
 
 	errno = 0;
 	if ((cd = cam_open_device(dev, O_RDWR)) == NULL) {
+		DEBUG("cam_open_device(%s)", dev);
 		logprint("cam_open_device(%s)", dev);
 		return (false);
 	}
@@ -1122,12 +1133,15 @@ scsi_has_media(const char *dev)
 	scsi_test_unit_ready(&ccb->csio, 0, NULL, MSG_ORDERED_Q_TAG,
 	    SSD_FULL_SIZE, 5000);
 	ccb->ccb_h.flags |= CAM_DEV_QFRZDIS;
-	if (cam_send_ccb(cd, ccb) == -1)
+	if (cam_send_ccb(cd, ccb) == -1) {
 		media = false;
-	else if ((ccb->ccb_h.status & CAM_STATUS_MASK) == CAM_REQ_CMP)
+		DEBUG("cam_send_ccb(cd, ccb) == -1");
+	} else if ((ccb->ccb_h.status & CAM_STATUS_MASK) == CAM_REQ_CMP)
 		media = true;
-	else
+	else {
+		DEBUG("ccb->ccb_h.status & CAM_STATUS_MASK) != CAM_REQ_CMP");
 		media = false;
+	}
 	cam_close_device(cd);
 	cam_freeccb(ccb);
 
@@ -1144,9 +1158,11 @@ media_changed()
 	static struct devlist_s *ep = NULL, *tmp = NULL;
 
 	SLIST_FOREACH_FROM_SAFE(ep, &pollq, next, tmp) {
+		DEBUG("Media changed: %s", ep->devp->dev);
 		switch (ep->devp->iface->type) {
 		case IF_TYPE_DA:
 		case IF_TYPE_CD:
+			DEBUG("scsi_has_media(%s)", ep->devp->dev);
 			media = scsi_has_media(ep->devp->dev);
 			break;
 		default:
@@ -1177,7 +1193,7 @@ update_device(sdev_t *devp)
 	char *p;
 
 	del_from_pollqueue(devp);
-
+	DEBUG("Entering update_device(%s)", devp->dev);
 	if (devp->has_media) {
 		/* Media inserted. */
 		free(devp->name); devp->name = NULL;
@@ -1189,12 +1205,14 @@ update_device(sdev_t *devp)
 			case ST_CDDA:
 			case ST_SVCD:
 			case ST_VCD:
+				DEBUG("ST_*CD");
 				devp->visible = true;
 				notifybc(devp, true);
 				return;
 			case ST_DATACD:
 			case ST_DVD:
 			case ST_BLURAY:
+				DEBUG("DATACD/DVD");
 				devp->fs = getfs(devp->dev);
 				if (devp->fs == NULL)
 					return;
@@ -1203,6 +1221,7 @@ update_device(sdev_t *devp)
 				break;
 			}
 		} else if ((devp->fs = getfs(devp->dev)) == NULL) {
+			DEBUG("getfs(%s) == NULL", devp->dev);
 			return;
 		}
 		if ((p = get_label(devp->dev, devp->fs->name)) != NULL) {
@@ -2258,7 +2277,7 @@ get_optical_disk_type(const char *path)
 	}
 done:	free(buf);
 	(void)close(fd);
-
+	
 	return (type);
 
 error:	saved_errno = errno;
@@ -2339,10 +2358,16 @@ get_storage_type(const char *devname)
 	switch (iface->type) {
 	case IF_TYPE_CD:
 		if (scsi_has_media(devname)) {
-			if ((type = get_optical_disk_type(devname)) == -1)
+			DEBUG("get_optical_disk_type(%s)", devname);
+			if ((type = get_optical_disk_type(devname)) == -1) {
+				DEBUG("get_optical_disk_type(%s) == -1",
+				    devname);
 				return (NULL);
-			if (type == ST_UNKNOWN)
+			}
+			if (type == ST_UNKNOWN) {
+				DEBUG("type == ST_UNKNOWN");
 				return (NULL);
+			}
 			return (st_from_type(type));
 		}
 		return (NULL);
