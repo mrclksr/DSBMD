@@ -26,6 +26,10 @@
 #define _COMMON_H_
 #include <stdbool.h>
 
+#define DEBUG(msg, ...) do { \
+	fprintf(stderr, "DEBUG: "msg"\n", ##__VA_ARGS__); \
+} while(0)
+
 extern void	   logprint(const char *, ...);
 extern void	   logprintx(const char *, ...);
 extern char	  *devpath(const char *);

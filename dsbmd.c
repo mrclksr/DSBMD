@@ -100,9 +100,6 @@
 	logprint(msg, ##__VA_ARGS__); exit(EXIT_FAILURE); \
 } while (0)
 
-#define DEBUG(msg, ...) do { \
-	fprintf(stderr, "DEBUG: "msg"\n", ##__VA_ARGS__); \
-} while(0)
 
 #define INITFS(i, ID) do {						     \
 	fstype[i].mntcmd   = dsbcfg_getval(cfg, CFG_##ID##_MNTCMD).string;   \
