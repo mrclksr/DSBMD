@@ -136,16 +136,23 @@ bbread(FILE *fp, long offs, size_t size)
 	static size_t  blocksize = 0, bufsz = 0;
 	static uint8_t *buf = NULL;
 
-	if (blocksize == 0) {
-		if (ioctl(fileno(fp), DIOCGSECTORSIZE, &blocksize) == -1) {
-			warn("getfs(): ioctl()");
-			blocksize = DFLTSBSZ;
-		}
+	//if (blocksize == 0) {
+	if (ioctl(fileno(fp), DIOCGSECTORSIZE, &blocksize) == -1) {
+		warn("getfs(): ioctl()");
+		blocksize = DFLTSBSZ;
 	}
+	DEBUG("blocksize == %zu", blocksize);
+	DEBUG("offs == %ld", offs);
+	DEBUG("size == %zu", size);
+ 
+	//}
 	if (bufsz == 0)
 		bufsz = blocksize;
 	d = offs / blocksize;
 	r = offs % blocksize;
+	
+	DEBUG("d == %d", d);
+	DEBUG("r == %d", r);
 	
 	if (bufsz - r < size || buf == NULL) {
 		p = realloc(buf, blocksize * ((size + r) / blocksize + 1));
@@ -155,6 +162,7 @@ bbread(FILE *fp, long offs, size_t size)
 		}
 		buf = p;
 		bufsz = blocksize * ((size + r) / blocksize + 1);
+		DEBUG("bufsz == %zu", bufsz);
 	}
 	if (fseek(fp, d * blocksize, SEEK_SET) == -1) {
 		warn("getfs(): fseek()");
