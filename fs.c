@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <err.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/uio.h>
@@ -83,16 +84,16 @@
 #define BTRFS_MAX_LABEL_SIZE	     0x100
 #define BTRFS_MAGIC		     "_BHRfS_M"
 
-static bool is_fat(FILE *);
-static bool is_ntfs(FILE *);
-static bool is_exfat(FILE *);
-static bool is_ufs(FILE *);
-static bool is_ext(FILE *);
-static bool is_ext4(FILE *dev);
-static bool is_iso9660(FILE *);
-static bool is_hfsp(FILE *);
-static bool is_xfs(FILE *);
-static bool is_btrfs(FILE *);
+static bool is_fat(int);
+static bool is_ntfs(int);
+static bool is_exfat(int);
+static bool is_ufs(int);
+static bool is_ext(int);
+static bool is_ext4(int);
+static bool is_iso9660(int);
+static bool is_hfsp(int);
+static bool is_xfs(int);
+static bool is_btrfs(int);
 
 fs_t fstype[] = {
 	{ "ufs",      UFS,     NULL, NULL,    NULL },
@@ -113,7 +114,7 @@ fs_t fstype[] = {
 const int nfstypes = sizeof(fstype) / sizeof(fstype[0]);
 
 static struct getfs_s {
-	bool (*chkf)(FILE *);
+	bool (*chkf)(int);
 	FSID type;
 } getfsd[] = {
 	{ is_fat,      MSDOSFS },
@@ -129,15 +130,14 @@ static struct getfs_s {
 };
 
 static uint8_t *
-bbread(FILE *fp, long offs, size_t size)
+bbread(int fd, long offs, size_t size)
 {
 	int	       d, r;
 	uint8_t	      *p;
-	static size_t  blocksize = 0, bufsz = 0;
+	static size_t  blocksize = 0, bufsz = 0, rd;
 	static uint8_t *buf = NULL;
 
-	//if (blocksize == 0) {
-	if (ioctl(fileno(fp), DIOCGSECTORSIZE, &blocksize) == -1) {
+	if (ioctl(fd, DIOCGSECTORSIZE, &blocksize) == -1) {
 		warn("getfs(): ioctl()");
 		blocksize = DFLTSBSZ;
 	}
@@ -145,7 +145,6 @@ bbread(FILE *fp, long offs, size_t size)
 	DEBUG("offs == %ld", offs);
 	DEBUG("size == %zu", size);
  
-	//}
 	if (bufsz == 0)
 		bufsz = blocksize;
 	d = offs / blocksize;
@@ -153,24 +152,27 @@ bbread(FILE *fp, long offs, size_t size)
 	
 	DEBUG("d == %d", d);
 	DEBUG("r == %d", r);
-	
-	if (bufsz - r < size || buf == NULL) {
-		p = realloc(buf, blocksize * ((size + r) / blocksize + 1));
+
+	if (bufsz < blocksize * (size / blocksize + !!r) || buf == NULL) {
+		DEBUG("Allocating %lu bytes", blocksize * (size/ blocksize + !!r));
+		p = realloc(buf, blocksize * (size / blocksize + !!r));
 		if (p == NULL) {
 			warn("getfs(): realloc()");
 			return (NULL);
 		}
 		buf = p;
-		bufsz = blocksize * ((size + r) / blocksize + 1);
+		bufsz = blocksize * (size / blocksize + !!r);
 		DEBUG("bufsz == %zu", bufsz);
 	}
-	if (fseek(fp, d * blocksize, SEEK_SET) == -1) {
-		warn("getfs(): fseek()");
+	if (lseek(fd, d * blocksize, SEEK_SET) == -1) {
+		warn("getfs(): lseek()");
 		return (NULL);
 	}
-	if (fread(buf, bufsz, 1, fp) < 1) {
-		warn("getfs(): fread()");
-		return (NULL);
+	while ((rd = read(fd, buf, bufsz)) < bufsz) {
+		if (errno != EINTR) {
+			warn("getfs(): read() == %zu", rd);
+			return (NULL);
+		}
 	}
 	errno = 0;
 	return (&buf[r]);
@@ -192,14 +194,14 @@ bbread(FILE *fp, long offs, size_t size)
  */
 
 static bool
-is_ntfs(FILE *fp)
+is_ntfs(int dev)
 {
 	int i;
 	uint8_t *sector, spc;
 	uint16_t bps;
 	uint64_t mft[2];
 	
-	if ((sector = bbread(fp, 0, DFLTSBSZ)) == NULL)
+	if ((sector = bbread(dev, 0, DFLTSBSZ)) == NULL)
 		return (false);
 	/* Check for boot sector signature */
 	if (le16dec(&sector[0x1fe]) != 0xaa55)
@@ -217,7 +219,7 @@ is_ntfs(FILE *fp)
         mft[1] = le64dec(&sector[0x38]);
 	
 	for (i = 0; i < 2; i++) {
-		if ((sector = bbread(fp, bps * spc * mft[i], 512)) == NULL)
+		if ((sector = bbread(dev, bps * spc * mft[i], 512)) == NULL)
 			continue;
 		if (strncmp((char *)sector, "FILE", 4) == 0)
 			return (true);
@@ -247,13 +249,13 @@ is_ntfs(FILE *fp)
  */
 
 static bool
-is_fat(FILE *fp)
+is_fat(int dev)
 {
 	int	 i;
 	uint8_t  *sector;
 	uint16_t fsisecno, bps;
 
-	if ((sector = bbread(fp, 0, DFLTSBSZ)) == NULL)
+	if ((sector = bbread(dev, 0, DFLTSBSZ)) == NULL)
 		return (false);
 	/* Check for boot sector signature */
 	if (le16dec(&sector[0x1fe]) != 0xaa55)
@@ -277,7 +279,7 @@ is_fat(FILE *fp)
 		if (fsisecno == 0 || fsisecno == 0xffff)
 			/* Try sector 1. */
 			fsisecno = 1;
-		if ((sector = bbread(fp, fsisecno * bps, bps)) == NULL)
+		if ((sector = bbread(dev, fsisecno * bps, bps)) == NULL)
 			return (false);
 		/* Check for FS Information Sector signature. */
 		if (strncmp((char *)sector, "RRaA", 4) == 0)
@@ -292,7 +294,7 @@ is_fat(FILE *fp)
 }
 
 static bool
-is_exfat(FILE *dev)
+is_exfat(int dev)
 {
 	uint8_t *p;
 
@@ -304,7 +306,7 @@ is_exfat(FILE *dev)
 }
 
 static bool
-is_hfsp(FILE *dev)
+is_hfsp(int dev)
 {
 	uint8_t *p;
 
@@ -317,7 +319,7 @@ is_hfsp(FILE *dev)
 }
 
 static bool
-is_ufs(FILE *dev)
+is_ufs(int dev)
 {
 	int	     i;
 	uint8_t	    *p;
@@ -336,7 +338,7 @@ is_ufs(FILE *dev)
 }
 
 static bool
-is_ext(FILE *dev)
+is_ext(int dev)
 {
 	uint8_t *p;
 
@@ -348,7 +350,7 @@ is_ext(FILE *dev)
 }
 
 static bool
-is_ext4(FILE *dev)
+is_ext4(int dev)
 {
 	int	i;
 	uint8_t *p;
@@ -371,19 +373,23 @@ is_ext4(FILE *dev)
 }
 
 static bool
-is_iso9660(FILE *dev)
+is_iso9660(int dev)
 {
 	char *p;
-
-	if ((p = (char *)bbread(dev, ISO9660_PD_OFFSET, 12)) == NULL)
+	DEBUG("In is_iso9660()");
+	if ((p = (char *)bbread(dev, ISO9660_PD_OFFSET, 12)) == NULL) {
+		DEBUG("Returning false");
 		return (false);
-	if (strncmp(&p[ISO9660_ID_OFFSET], ISO9660_ID, strlen(ISO9660_ID)) == 0)
+	}
+	if (strncmp(&p[ISO9660_ID_OFFSET], ISO9660_ID, strlen(ISO9660_ID)) == 0) {
+		DEBUG("ISO9660 detected");
 		return (true);
+	}
 	return (false);
 }
 
 static bool
-is_xfs(FILE *dev)
+is_xfs(int dev)
 {
 	uint8_t *p;
 
@@ -396,7 +402,7 @@ is_xfs(FILE *dev)
 }
 
 static bool
-is_btrfs(FILE *dev)
+is_btrfs(int dev)
 {
 	uint8_t *p;
 
@@ -411,25 +417,24 @@ is_btrfs(FILE *dev)
 fs_t *
 getfs(const char *disk)
 {
-	int   i, j;
-	FILE *dev;
+	int i, j, fd;
 
-	if ((dev = fopen(disk, "r")) == NULL) {
-		warn("fopen(%s)", disk);
+	if ((fd = open(disk, O_RDONLY)) == -1) {
+		warn("open(%s)", disk);
 		return (NULL);
 	}
 	for (i = 0; i < sizeof(getfsd) / sizeof(struct getfs_s); i++) {
-		if (getfsd[i].chkf(dev)) {
+		if (getfsd[i].chkf(fd)) {
 			for (j = 0; j < nfstypes; j++) {
 				if (getfsd[i].type == fstype[j].id) {
-					(void)fclose(dev);
+					(void)close(fd);
 					return (&fstype[j]);
 				}
 			}
 		} else if (errno > 0)
 			warn("getfs()");
 	}
-	(void)fclose(dev);
+	(void)close(fd);
 
 	return (NULL);
 }
@@ -437,18 +442,18 @@ getfs(const char *disk)
 char *
 get_exfat_label(const char *dev)
 {
-	FILE	    *fp;
+	int	    fd;
 	u_int	     frdc, bps, spc, offs, cho, i, chs;
 	u_char	    *p;
 	static char  label[EXFAT_MAX_LABEL_SIZE];
 
-	if ((fp = fopen(dev, "r")) == NULL) {
-		warn("get_exfat_label(): fopen(%s)", dev);
+	if ((fd = open(dev, O_RDONLY)) == -1) {
+		warn("get_exfat_label(): open(%s)", dev);
 		return (NULL);
 	}
-	if ((p = bbread(fp, 0, DFLTSBSZ)) == NULL) {
+	if ((p = bbread(fd, 0, DFLTSBSZ)) == NULL) {
 		warn("get_exfat_label(): bbread()");
-		(void)fclose(fp);
+		(void)close(fd);
 		return (NULL);
 	}
 	frdc = le32dec(&p[EXFAT_ROOTDIR_CLUSTER_OFFSET]);
@@ -460,9 +465,9 @@ get_exfat_label(const char *dev)
 	chs = cho * bps + (bps * spc) * (frdc - 2);
 
 	for (offs = 0; offs < EXFAT_MAX_ENTS; offs++) {
-		if ((p = bbread(fp, chs + offs * 32, 32)) == NULL) {
+		if ((p = bbread(fd, chs + offs * 32, 32)) == NULL) {
 			warn("get_exfat_label(): bbread()");
-			(void)fclose(fp);
+			(void)close(fd);
 			return (NULL);
 		}
 		if (p[0] == EXFAT_ENT_TYPE_NOLABEL)
@@ -472,17 +477,17 @@ get_exfat_label(const char *dev)
 			            i < EXFAT_MAX_LABEL_SIZE / 2; i++) {
 				/* ATM, we're only accepting ASCII labels. */
 				if (p[EXFAT_LABEL_OFFSET + 2 * i + 1] != 0) {
-					(void)fclose(fp);
+					(void)close(fd);
 					return (NULL);
 				}
 				label[i] = p[EXFAT_LABEL_OFFSET + i * 2];
 			}
 			label[i] = 0;
-			(void)fclose(fp);
+			(void)close(fd);
 			return (label);
 		}
 	}
-	(void)fclose(fp);
+	(void)close(fd);
 	return (NULL);
 }
 
@@ -532,16 +537,16 @@ cd9660_get_volid(const char *path)
 char *
 get_xfs_label(const char *path)
 {
-	FILE	    *fp;
+	int	    fd;
 	u_char	    *p;
 	static char  label[XFS_MAX_LABEL_SIZE];
 
-	if ((fp = fopen(path, "r")) == NULL) {
-		warn("get_xfs_label(): fopen(%s)", path);
+	if ((fd = open(path, O_RDONLY)) == -1) {
+		warn("get_xfs_label(): open(%s)", path);
 		return (NULL);
 	}
-	p = bbread(fp, XFS_LABEL_OFFSET, sizeof(label));
-	(void)fclose(fp);
+	p = bbread(fd, XFS_LABEL_OFFSET, sizeof(label));
+	(void)close(fd);
 	if (p == NULL) {
 		warn("get_xfs_label(): bbread()");
 		return (NULL);
@@ -553,16 +558,16 @@ get_xfs_label(const char *path)
 char *
 get_btrfs_label(const char *path)
 {
-	FILE	    *fp;
+	int	fd;
 	u_char	    *p;
 	static char  label[BTRFS_MAX_LABEL_SIZE];
 
-	if ((fp = fopen(path, "r")) == NULL) {
-		warn("get_btrfs_label(): fopen(%s)", path);
+	if ((fd = open(path, O_RDONLY)) == -1) {
+		warn("get_btrfs_label(): open(%s)", path);
 		return (NULL);
 	}
-	p = bbread(fp, BTRFS_SB_OFFSET, sizeof(label));
-	(void)fclose(fp);
+	p = bbread(fd, BTRFS_SB_OFFSET, sizeof(label));
+	(void)close(fd);
 	if (p == NULL) {
 		warn("get_btrfs_label(): bbread()");
 		return (NULL);
