@@ -556,21 +556,7 @@ main(int argc, char *argv[])
 			case MSGTYPE_DEL_DEVICE:
 				if ((devp = lookup_dev(msg.dev)) == NULL)
 					break;
-				/*
-				 * Do not delete cd devices.
-				 */
-				if (devp->iface->type != IF_TYPE_CD)
-					del_device(devp);
-				else {
-					/*
-					 * In case of a cd device, mark the
-					 * media removed.
-					 */
-					if (devp->has_media) {
-						devp->has_media = false;
-						update_device(devp);
-					}
-				}
+				del_device(devp);
 				break;
 			case MSGTYPE_UPDATE_DEVICE:
 				update_device(msg.devp);
@@ -996,7 +982,7 @@ devd_thr(void *ipcsock)
 					msg.type = MSGTYPE_ADD_DEVICE;
 				else if (strcmp(devdevent.type, "DESTROY") == 0)
 					msg.type = MSGTYPE_DEL_DEVICE;
-				else
+ 				else
 					continue;
 				(void)strncpy(msg.dev, devdevent.cdev,
 				    sizeof(msg.dev));
@@ -2173,11 +2159,14 @@ get_optical_disk_type(const char *path)
 	struct iso_primary_descriptor *ip;
 	struct ioc_read_toc_single_entry tocent;
 
-	if (!scsi_has_media(path))
+	if (!scsi_has_media(path)) {
+		DEBUG("scsi_has_media() failed");
 		return (-1);
+	}
 	buf = NULL; type = ST_UNKNOWN;
-	if ((fd = open(path, O_RDONLY)) == -1)
+	if ((fd = open(devpath(path), O_RDONLY)) == -1) {
 		goto error;
+	}
 	if ((pbs = g_sectorsize(fd)) == -1)
 		goto error;
 	if (ioctl(fd, CDIOREADTOCHEADER, &tochdr) == -1)
@@ -2357,6 +2346,7 @@ get_storage_type(const char *devname)
 		if (scsi_has_media(devname)) {
 			DEBUG("get_optical_disk_type(%s)", devname);
 			if ((type = get_optical_disk_type(devname)) == -1) {
+				warn("get_optical_disk_type()");
 				DEBUG("get_optical_disk_type(%s) == -1",
 				    devname);
 				return (NULL);
