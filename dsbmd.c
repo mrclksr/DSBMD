@@ -2164,7 +2164,7 @@ get_optical_disk_type(const char *path)
 	if (!scsi_has_media(path))
 		return (-1);
 	buf = NULL; type = ST_UNKNOWN;
-	if ((fd = open(path, O_RDONLY)) == -1)
+	if ((fd = open(devpath(path), O_RDONLY)) == -1)
 		goto error;
 	if ((pbs = g_sectorsize(fd)) == -1)
 		goto error;
