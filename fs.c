@@ -21,7 +21,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 #include <stdio.h>
 #include <ctype.h>
 #include <stdlib.h>
@@ -134,7 +133,7 @@ bbread(int fd, long offs, size_t size)
 {
 	int	       d, r;
 	uint8_t	      *p;
-	static size_t  blocksize = 0, bufsz = 0, rd;
+	static size_t  blocksize = 0, bufsz = 0, rd, toread;
 	static uint8_t *buf = NULL;
 
 	if (ioctl(fd, DIOCGSECTORSIZE, &blocksize) == -1) {
@@ -149,26 +148,29 @@ bbread(int fd, long offs, size_t size)
 		bufsz = blocksize;
 	d = offs / blocksize;
 	r = offs % blocksize;
-	
+	toread = blocksize * (size / blocksize + !!(size % blocksize));
+
+
 	DEBUG("d == %d", d);
 	DEBUG("r == %d", r);
+	DEBUG("toread == %zu", toread);
 
-	if (bufsz < blocksize * (size / blocksize + !!r) || buf == NULL) {
-		DEBUG("Allocating %lu bytes", blocksize * (size/ blocksize + !!r));
-		p = realloc(buf, blocksize * (size / blocksize + !!r));
+	if (bufsz < toread || buf == NULL) {
+		DEBUG("Allocating %lu bytes", toread);
+		p = realloc(buf, toread);
 		if (p == NULL) {
 			warn("getfs(): realloc()");
 			return (NULL);
 		}
 		buf = p;
-		bufsz = blocksize * (size / blocksize + !!r);
+		bufsz = toread;
 		DEBUG("bufsz == %zu", bufsz);
 	}
 	if (lseek(fd, d * blocksize, SEEK_SET) == -1) {
 		warn("getfs(): lseek()");
 		return (NULL);
 	}
-	while ((rd = read(fd, buf, bufsz)) < bufsz) {
+	while ((rd = read(fd, buf, toread)) < toread) {
 		if (errno != EINTR) {
 			warn("getfs(): read() == %zu", rd);
 			return (NULL);
