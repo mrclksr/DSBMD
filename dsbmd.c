@@ -427,10 +427,12 @@ main(int argc, char *argv[])
 			if (pidfile_fileno(pfh) != i)
 				(void)close(i);
 		}
-		/* Redirect error messages to logfile. */
+		/* Redirect error messages, stdout and stderr to logfile. */
 		if ((fp = fopen(PATH_DSBMD_LOG, "a+")) == NULL)
 			err(EXIT_FAILURE, "fopen()");
 		(void)setvbuf(fp, NULL, _IOLBF, 0);
+		(void)dup2(fileno(fp), STDERR_FILENO);
+		(void)dup2(fileno(fp), STDOUT_FILENO);
 		err_set_file(fp);
 	} else
 		lockpidfile();
@@ -1569,7 +1571,7 @@ ssystem(uid_t uid, const char *cmd)
 		else if (ret == (pid_t)-1)
 			die("waitpid()");
 		else if (ret == pid)
-			return (status == 255 ? -1 : status);
+			return (status == 255 ? -1 : WEXITSTATUS(status));
 		(void)sleep(1);
 		i++;
 	}
@@ -1586,8 +1588,10 @@ ssystem(uid_t uid, const char *cmd)
 					continue;
 				else if (ret == (pid_t)-1)
 					die("waitpid()");
-				else if (ret == pid)
-					return (status == 255 ? -1 : status);
+				else if (ret == pid) {
+					return (status == 255 ? -1 : \
+					    WEXITSTATUS(status));
+				}
 				(void)sleep(1);
 				i++;
 			}
@@ -1595,7 +1599,7 @@ ssystem(uid_t uid, const char *cmd)
 	}
 	if (errno != 0)
 		return (-1);
-	return (status == 255 ? -1 : status);
+	return (status == 255 ? -1 : WEXITSTATUS(status));
 }
 
 static int
