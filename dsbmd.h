@@ -45,6 +45,7 @@
 #define NGLBLPRFX		6
 #define GLBLPRFX		{ NULL, "label", "ufs", "gpt", "ufsid", "gptid" }
 
+#define PATH_FUSE		"/dev/fuse"
 #define PATH_DEVD_SOCKET	"/var/run/devd.seqpacket.pipe"
 
 #define SOCK_ERR_CONN_CLOSED	1
