@@ -132,7 +132,7 @@ static uint8_t *
 bbread(int fd, long offs, size_t size)
 {
 	int	       d, r;
-	uint8_t	      *p;
+	uint8_t	       *p;
 	static size_t  blocksize = 0, bufsz = 0, rd, toread;
 	static uint8_t *buf = NULL;
 
@@ -163,7 +163,7 @@ bbread(int fd, long offs, size_t size)
 		}
 	}
 	errno = 0;
-	return (&buf[r]);
+	return (buf + r);
 }
 
 /*
