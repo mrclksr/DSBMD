@@ -24,7 +24,7 @@
 #	In dsbmd.conf:
 #	ntfs_mount_cmd = /path/to/ntfs_mount_rw
 ##############################################################################
-cfgversion = 1006
+cfgversion = 1007
 
 # Define filesystem kernel modules to load at DSBMD startup.
 preload_kmods = ufs, msdosfs, cd9660, ext2fs, fuse, geom_linux_lvm
@@ -56,6 +56,11 @@ usermount = true
 # "yes", "no", or "force". The latter means these filesystems will be unmounted
 # even if they are busy.
 unmount_on_exit = "no"
+
+# In order to allow non-members of the operator group to mount a device via
+# a fuse daemon, dsbmd changes the ownership of the fuse device, calls the
+# mount command, and restores the previous ownership.
+chown_fuse = "yes"
 
 # msdosfs_opts - Option string to pass to the msdosfs mount function.
 # See also fstab(5) and mount_msdosfs(8).
