@@ -1817,21 +1817,25 @@ exec_mntcmd(client_t *cli, sdev_t *devp, char *mntpath)
 		uid = cli->uid;
 		gid = cli->gids[0];
 		mntcmd = devp->fs->mntcmd_u;
-		if (access(PATH_FUSE, F_OK) == -1) {
-			if (errno != ENOENT)
-				warn("access(%s)", PATH_FUSE);
-		} else if (stat(PATH_FUSE, &sb) == -1) {
-			warn("stat(%s)", PATH_FUSE);
-		} else {
-			/*
-			 * Change the owner of the fuse device, temporarily.
-			 */
-			fuse_uid = sb.st_uid;
-			fuse_gid = sb.st_gid;
-			if (chown(PATH_FUSE, cli->uid, fuse_gid) == -1)
-				warn("chown(%s, %u)", PATH_FUSE, cli->uid);
-			else
-				chown_fuse = true;
+
+		if (dsbcfg_getval(cfg, CFG_CHOWN_FUSE).boolean) {
+			if (access(PATH_FUSE, F_OK) == -1) {
+				if (errno != ENOENT)
+					warn("access(%s)", PATH_FUSE);
+			} else if (stat(PATH_FUSE, &sb) == -1) {
+				warn("stat(%s)", PATH_FUSE);
+			} else {
+				/*
+				 * Change the owner of the fuse device,
+				 * temporarily.
+				 */
+				fuse_uid = sb.st_uid;
+				fuse_gid = sb.st_gid;
+				if (chown(PATH_FUSE, cli->uid, fuse_gid) == -1)
+					warn("chown(%s, %u)", PATH_FUSE, cli->uid);
+				else
+					chown_fuse = true;
+			}
 		}
 	} else {
 		uid = 0;
