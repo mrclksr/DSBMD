@@ -37,9 +37,6 @@ ${CFGFILE}: ${CFGFILE}.tmpl
 # Remove "large" mount option from config file on FreeBSD >= 12
 # Replace "fuse" by "fusefs" on FreeBSD >= 12.1
 	version=${FREEBSD_VERSION}; \
-	if [ $${version} -lt 100 ]; then \
-		version=$$(($${version} * 10)); \
-	fi; \
 	cp ${CFGFILE}.tmpl ${CFGFILE}; \
 	if [ $${version} -ge 120 ]; then \
 		sed -i '' 's|large,||g' ${CFGFILE}; \
