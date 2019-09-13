@@ -11,7 +11,7 @@ CFGDIR	       	     = ${PREFIX}/etc
 DOCSDIR		    ?= ${PREFIX}/share/doc/${PROGRAM}
 DOCS		     = readme.mdoc
 SOURCES		     = ${PROGRAM}.c config.c dsbcfg/dsbcfg.c fs.c common.c
-FREEBSD_VERSION	     = `freebsd-version -u | awk -F"[.-]" '{ print $$1 }'`
+FREEBSD_VERSION	     = `freebsd-version -u | cut -d- -f 1 | tr -d .`
 PROGRAM_FLAGS	     = -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_LOG=\"${LOGFILE}\"
 PROGRAM_FLAGS	    += -DPATH_PID_FILE=\"${PIDFILE}\"
@@ -35,10 +35,18 @@ ${RCSCRIPT}: ${RCSCRIPT}.tmpl
 
 ${CFGFILE}: ${CFGFILE}.tmpl
 # Remove "large" mount option from config file on FreeBSD >= 12
+# Replace "fuse" by "fusefs" on FreeBSD >= 12.1
 	version=${FREEBSD_VERSION}; \
-	if [ $${version} -ge 12 ]; then \
-		sed 's|large,||g' ${CFGFILE}.tmpl > ${CFGFILE}; \
-	else cp ${CFGFILE}.tmpl ${CFGFILE}; fi
+	if [ $${version} -lt 100 ]; then \
+		version=$$(($${version} * 10)); \
+	fi; \
+	cp ${CFGFILE}.tmpl ${CFGFILE}; \
+	if [ $${version} -ge 120 ]; then \
+		sed -i '' 's|large,||g' ${CFGFILE}; \
+	fi; \
+	if [ $${version} -ge 121 ]; then \
+		sed -i '' 's|fuse|fusefs|g' ${CFGFILE}; \
+	fi
 
 install: ${PROGRAM} ${RCSCRIPT} ${CFGFILE}
 	${BSD_INSTALL_PROGRAM} ${PROGRAM} ${DESTDIR}${BINDIR}
