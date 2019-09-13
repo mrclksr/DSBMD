@@ -115,7 +115,7 @@ void
 check_cfg_opts(dsbcfg_t *cfg)
 {
 	bool polliv, pollex;
-#if FREEBSD_VERSION >= 12
+#if FREEBSD_VERSION >= 120
 	/* In case of FreeBSD >= 12 and msdosfs: remove the "large" option. */
 	bool large = false;
 	char *p, *mopts;
