@@ -24,6 +24,7 @@
 
 #include <err.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "dsbcfg/dsbcfg.h"
 #include "config.h"
@@ -116,10 +117,41 @@ check_cfg_opts(dsbcfg_t *cfg)
 {
 	bool polliv, pollex;
 #if FREEBSD_VERSION >= 120
-	/* In case of FreeBSD >= 12 and msdosfs: remove the "large" option. */
 	bool large = false;
 	char *p, *mopts;
-
+#endif
+#if FREEBSD_VERSION >= 121
+	char **v;
+	/* Replace "fuse" by "fusefs" on FreeBSD >= 12.1 */
+	for (v = dsbcfg_getval(cfg, CFG_PRELOAD_KMODS).strings;
+	    v != NULL && *v != NULL; v++) {
+		if (strcmp(*v, "fuse") != 0)
+			continue;
+		free(*v);
+		if ((*v = strdup("fusefs")) == NULL)
+			err(EXIT_FAILURE, "strdup()");
+		HEADER();
+		warnx("The fuse module has been renamed to fusefs.");
+		warnx("");
+		warnx("Please adjust your dsbmd.conf.");
+		FOOTER();
+	}
+#endif
+	pollex = polliv = false;
+	if (dsbcfg_getval(cfg, CFG_POLL_EXCEPTIONS).strings != NULL)
+		pollex = true;
+	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer != -1)
+		polliv = true;
+	if (pollex || polliv) {
+		HEADER();
+		if (pollex)
+			warnx("Ignoring deprecated 'poll_exceptions' variable");
+		if (polliv)
+			warnx("Ignoring deprecated 'poll_interval' variable");
+		FOOTER();
+	}
+#if FREEBSD_VERSION >= 120
+	/* In case of FreeBSD >= 12 and msdosfs: remove the "large" option. */
 	mopts = dsbcfg_getval(cfg, CFG_MSDOSFS_OPTS).string;
 	if (mopts == NULL)
 		return;
@@ -142,18 +174,5 @@ check_cfg_opts(dsbcfg_t *cfg)
 	warnx("Please adjust your dsbmd.conf.");
 	FOOTER();
 #endif
-	pollex = polliv = false;
-	if (dsbcfg_getval(cfg, CFG_POLL_EXCEPTIONS).strings != NULL)
-		pollex = true;
-	if (dsbcfg_getval(cfg, CFG_POLL_INTERVAL).integer != -1)
-		polliv = true;
-	if (pollex || polliv) {
-		HEADER();
-		if (pollex)
-			warnx("Ignoring deprecated 'poll_exceptions' variable");
-		if (polliv)
-			warnx("Ignoring deprecated 'poll_interval' variable");
-		FOOTER();
-	}
 }
 
