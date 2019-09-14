@@ -42,7 +42,7 @@ ${CFGFILE}: ${CFGFILE}.tmpl
 		sed -i '' 's|large,||g' ${CFGFILE}; \
 	fi; \
 	if [ $${version} -ge 121 ]; then \
-		sed -i '' 's|fuse|fusefs|g' ${CFGFILE}; \
+		sed -i '' '|^preload_kmods|s|fuse|fusefs|g' ${CFGFILE}; \
 	fi
 
 install: ${PROGRAM} ${RCSCRIPT} ${CFGFILE}
