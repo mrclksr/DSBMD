@@ -859,13 +859,16 @@ read_devd_event(int s, int *error)
 		if ((n = recvmsg(s, &msg, 0)) == (ssize_t)-1) {
 			if (errno == EINTR)
 				continue;
-			if (errno == ECONNRESET) {
+			if (errno == ECONNRESET || errno == ENOTCONN) {
 				*error = SOCK_ERR_CONN_CLOSED;
 				return (NULL);
 			}
 			if (errno == EAGAIN)
 				return (NULL);
 			die("recvmsg()");
+		} else if (n == 0 && rd == 0) {
+			*error = SOCK_ERR_CONN_CLOSED;
+			return (NULL);
 		}
 		if (rd + n + 1 > bufsz) {
 			if ((lnbuf = realloc(lnbuf, rd + n + 65)) == NULL)
@@ -1017,6 +1020,7 @@ devd_thr(void *ipcsock)
 				die("Connecting to devd failed. Giving up.");
 			else if (error == SOCK_ERR_IO_ERROR)
 				die("read_devd_event()");
+			FD_ZERO(&_rset); FD_SET(devd, &_rset);
 		}
 	}
 }
