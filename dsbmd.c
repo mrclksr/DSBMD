@@ -2632,6 +2632,12 @@ add_device(const char *devname)
 
 	if ((dev.iface = iface_from_name(devname)) == NULL)
 		return (NULL);
+	/* Get full path to device */
+	path = devpath(devname);
+	if (dev.iface->type == IF_TYPE_CD || dev.iface->type == IF_TYPE_DA)
+		dev.has_media = scsi_has_media(get_diskname(path));
+	else
+		dev.has_media = has_media(path);
 	if ((dev.st = get_storage_type(devname)) != NULL) {
 		if (dev.st->type == ST_MTP)
 			return (add_mtp_device(devname));
@@ -2667,12 +2673,6 @@ add_device(const char *devname)
 		return (NULL);
 	if (!is_mountable(devname))
 		return (NULL);
-	/* Get full path to device */
-	path = devpath(devname);
-	if (dev.iface->type == IF_TYPE_CD || dev.iface->type == IF_TYPE_DA)
-		dev.has_media = scsi_has_media(get_diskname(path));
-	else
-		dev.has_media = has_media(path);
 	if (dev.has_media)
 		dev.fs = getfs(path);
 	else
