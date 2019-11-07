@@ -891,7 +891,7 @@ read_devd_event(int s, int *error)
 static void
 parse_devd_event(char *str)
 {
-	char	   *next, *var, *val;
+	char	   *next, *var, *val, *p;
 	const char *cs;
 
 	devdevent.system = devdevent.subsystem = devdevent.type = "";
@@ -920,8 +920,15 @@ parse_devd_event(char *str)
 			devdevent.cdev = val;
 		else if (strcmp(var, "device") == 0)
 			devdevent.device = val;
-		else if (strcmp(var, "scsi_sense") == 0)
-			devdevent.scsi_sense = val;
+		else if (strcmp(var, "scsi_sense") == 0) {
+			/* Skip SCSI return code. */
+			if ((p = strchr(val, ' ')) != NULL)
+				devdevent.scsi_sense = ++p;
+			else {
+				logprintx("Invalid SCSI sense data?: %s", val);
+				devdevent.scsi_sense = val;
+			}
+		}
 	}
 }
 
