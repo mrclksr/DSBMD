@@ -996,9 +996,18 @@ devd_thr(void *ipcsock)
 				    sizeof(msg.dev));
 			} else if (strncmp(devdevent.scsi_sense,
 			    SCSI_SENSE_BECOMING_READY,
-			    strlen(SCSI_SENSE_BECOMING_READY)) == 0) {
+			    strlen(SCSI_SENSE_BECOMING_READY)) == 0    ||
+			    strcmp(devdevent.type, "MEDIACHANGE") == 0 ||
+			    strncmp(devdevent.scsi_sense,
+			    SCSI_SENSE_MEDIA_CHANGE,
+			    strlen(SCSI_SENSE_MEDIA_CHANGE)) == 0) {
 				/* Media becoming ready */
-				devp = lookup_dev(devdevent.device);
+				devp = lookup_dev(!devdevent.device ? \
+				    devdevent.cdev : devdevent.device);
+				if (devp == NULL) {
+					devp = add_device(!devdevent.device ? \
+					    devdevent.cdev : devdevent.device);
+				}
 				if (devp != NULL && !devp->has_media) {
 					msg.type = MSGTYPE_CHECK_FOR_MEDIA;
 					msg.devp = devp;
