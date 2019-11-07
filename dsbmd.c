@@ -93,8 +93,9 @@
 #define USB_CLASS_UMASS	   0x08
 #define USB_PROTOCOL_PTP   0x01
 
-#define SCSI_SENSE_NOT_PRESENT	  "70 02 3a"
-#define SCSI_SENSE_BECOMING_READY "70 02 04 01"
+#define SCSI_SENSE_NOT_PRESENT	  "02 3a"
+#define SCSI_SENSE_BECOMING_READY "02 04 01"
+#define SCSI_SENSE_MEDIA_CHANGE	  "06 28 00"
 
 #define die(msg, ...) do { \
 	logprint(msg, ##__VA_ARGS__); exit(EXIT_FAILURE); \
