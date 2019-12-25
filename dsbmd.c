@@ -1825,7 +1825,7 @@ mount_device(client_t *cli, sdev_t *devp)
 static int
 exec_mntcmd(client_t *cli, sdev_t *devp, char *mntpath)
 {
-	int	    error;
+	int	    error, unit, addr;
 	bool	    chown_fuse;
 	char	    num[12];
 	uid_t	    uid, fuse_uid;
@@ -1874,6 +1874,11 @@ exec_mntcmd(client_t *cli, sdev_t *devp, char *mntpath)
 	if (devp->iface->type == IF_TYPE_UGEN) {
 		(void)setenv(ENV_USB_PORT,
 		    ugen_to_gphoto_port(devbasename(devp->dev)), 1);
+		(void)get_ugen_bus_and_addr(devbasename(devp->dev), &unit, &addr);
+		(void)snprintf(num, sizeof(num), "%u", unit);
+		(void)setenv(ENV_USB_UNIT, num, 1);
+		(void)snprintf(num, sizeof(num), "%u", addr);
+		(void)setenv(ENV_USB_ADDR, num, 1);
 	}
 	if ((error = ssystem(uid, mntcmd)) == 0 && !is_mntpt(mntpath)) {
 		cliprint(cli, "E:command=mount:code=%d", ERR_UNKNOWN_ERROR);

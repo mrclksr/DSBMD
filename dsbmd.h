@@ -41,6 +41,8 @@
 #define ENV_FILESYSTEM		"DSBMD_FILESYSTEM"
 #define ENV_MNTPT		"DSBMD_MNTPT"
 #define ENV_USB_PORT		"DSBMD_GPHOTO_USB_PORT"
+#define ENV_USB_UNIT		"DSBMD_USB_UNIT"
+#define ENV_USB_ADDR		"DSBMD_USB_ADDR"
 
 #define NGLBLPRFX		6
 #define GLBLPRFX		{ NULL, "label", "ufs", "gpt", "ufsid", "gptid" }
