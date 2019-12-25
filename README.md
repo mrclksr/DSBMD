@@ -87,7 +87,7 @@ Depending on your needs, install the FreeBSD ports
 (Ext2/3/4),
 *fusefs-hfsfuse*, *fusefs-lkl*
 (BTRFS, Ext4, and XFS), and
-*fusefs-simple-mtpfs*.
+*fusefs-jmtpfs*.
 **DSBMD**
 comes with predefined commands in
 *dsbmd.conf*
@@ -369,4 +369,4 @@ and
 'used'
 are 0.
 
- \- August 30, 2018
+ \- December 25, 2019
