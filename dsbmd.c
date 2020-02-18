@@ -149,6 +149,7 @@ static char	*dev_from_gptid(const char *);
 static char	*ugen_to_gphoto_port(const char *);
 static void	*poll_thr(void *);
 static void	*devd_thr(void *);
+static void	*cmd_thr(void *);
 static void	lockpidfile(void);
 static void	usage(void);
 static void	setuserenv(uid_t);
@@ -248,6 +249,22 @@ struct command_s {
 	{ "mdattach",	&cmd_mdattach}
 };
 
+typedef struct cmdthread_s {
+	char		**argv;
+	bool		timedout;
+	jmp_buf		jmpenv;
+	client_t	*cli;
+	pthread_t	tid;
+	pthread_cond_t	cond;
+	pthread_mutex_t	mtx;
+	struct command_s *cmd;
+} cmdthread_t;
+
+struct thrlist_s {
+	cmdthread_t *cmdthr;
+	SLIST_ENTRY(thrlist_s) next;
+};
+
 /* 
  * Struct to represent a message sent from the threads
  * to the main thread.
@@ -266,7 +283,6 @@ enum {
 static int	ipcsv[2];		/* IPC socket pair for threads. */
 static uid_t	*allow_uids   = NULL;	/* UIDs allowed to connect. */
 static gid_t	*allow_gids   = NULL;	/* GIDs allowed to connect. */
-static jmp_buf  jmpenv;
 static dsbcfg_t	*cfg	      = NULL;
 static struct pidfh *pfh      = NULL;	/* PID file handle. */
 static pthread_mutex_t pollqmtx;
@@ -274,6 +290,7 @@ static pthread_mutex_t ipcsockmtx;
 static SLIST_HEAD(, devlist_s) devs;	/* List of mountable devs. */
 static SLIST_HEAD(, clilist_s) clis;	/* List of connected clients. */
 static SLIST_HEAD(, devlist_s) pollq;	/* Poll queue */
+static SLIST_HEAD(, thrlist_s) cmdthreads;
 
 int
 main(int argc, char *argv[])
@@ -287,6 +304,7 @@ main(int argc, char *argv[])
 	time_t	       mntchktime;
 	sdev_t	       *devp;
 	fd_set	       allset, rset;
+	sigset_t       sset;
 	client_t       *cli;
 	pthread_t      tid;
 	struct stat    sb;
@@ -437,12 +455,17 @@ main(int argc, char *argv[])
 		err_set_file(fp);
 	} else
 		lockpidfile();
+	sigfillset(&sset);
+	sigdelset(&sset, SIGINT);
+	sigdelset(&sset, SIGTERM);
+	sigdelset(&sset, SIGQUIT);
+	sigdelset(&sset, SIGHUP);
+	if (sigprocmask(SIG_SETMASK, &sset, NULL) == -1)
+		die("sigprocmask()");
 	(void)signal(SIGINT, cleanup);
 	(void)signal(SIGTERM, cleanup);
 	(void)signal(SIGQUIT, cleanup);
 	(void)signal(SIGHUP, cleanup);
-	(void)signal(SIGPIPE, SIG_IGN);
-	(void)signal(SIGALRM, SIG_IGN);
 
 	logprintx("%s started", PROGRAM);
 
@@ -3491,23 +3514,78 @@ strtoargv(char *str, char **argv, size_t argvsz, size_t *argc)
 }
 
 static void
-catch_cmd_timout(int signo)
+catch_cmd_timeout(int signo)
 {
-	struct itimerval itmval;
+	pthread_t tid = pthread_self();
+	struct thrlist_s *ep;
 
-	(void)getitimer(ITIMER_REAL, &itmval);
-	if (itmval.it_value.tv_sec == 0)
-		longjmp(jmpenv, 1);
+	SLIST_FOREACH(ep, &cmdthreads, next) {
+		if (ep->cmdthr->tid == tid && ep->cmdthr->timedout)
+			longjmp(ep->cmdthr->jmpenv, 1);
+	}
+}
+
+static cmdthread_t *
+add_cmdthr(client_t *cli, struct command_s *cmd, size_t argc, const char **argv)
+{
+	size_t i;
+	cmdthread_t	 *ct;
+	struct thrlist_s *cep;
+
+	if ((ct = malloc(sizeof(cmdthread_t))) == NULL ||
+	    (cep = malloc(sizeof(struct thrlist_s))) == NULL)
+		die("malloc()");
+	if ((ct->argv = malloc((argc + 1) * sizeof(char *))) == NULL)
+		die("malloc()");
+	for (i = 0; i < argc; i++) {
+		if ((ct->argv[i] = strdup(argv[i])) == NULL)
+			die("strdup()");
+	}
+	ct->argv[i]  = NULL;
+	ct->cli      = cli;
+	ct->cmd	     = cmd;
+	ct->timedout = false;
+	cep->cmdthr  = ct;
+	if (pthread_cond_init(&ct->cond, NULL) != 0)
+		die("pthread_cond_init()");
+	if (pthread_mutex_init(&ct->mtx, NULL) != 0)
+		die("pthread_mutex_init()");
+	SLIST_INSERT_HEAD(&cmdthreads, cep, next);
+
+	return (ct);
+}
+
+static void
+del_cmdthr(cmdthread_t *cmdthr)
+{
+	struct thrlist_s *ep;
+
+	SLIST_FOREACH(ep, &cmdthreads, next) {
+		if (ep->cmdthr->tid == cmdthr->tid)
+			break;
+	}
+	if (ep == NULL)
+		return;
+	warnx("Removing cmdthr entry ..");
+	pthread_cond_destroy(&ep->cmdthr->cond);
+	pthread_mutex_destroy(&ep->cmdthr->mtx);
+	while (ep->cmdthr->argv != NULL && *ep->cmdthr->argv != NULL)
+		free(*ep->cmdthr->argv++);
+	if (ep->cmdthr->argv != NULL)
+		free(ep->cmdthr->argv);
+	free(ep->cmdthr);
+	SLIST_REMOVE(&cmdthreads, ep, thrlist_s, next);
 }
 
 static void
 exec_cmd(client_t *cli, char *cmdstr)
 {
-	int    i;
+	int    i, ret;
 	char   *argv[12];
 	size_t argc;
+	cmdthread_t	 *ct;
+	struct timespec	 at;
 	struct command_s *cp;
-	struct itimerval itmval = { { 0, 0}, {0, 0} };
 
 	(void)strtok(cmdstr, "\r\n");
 	if (strlen(cmdstr) == 0) {
@@ -3527,23 +3605,55 @@ exec_cmd(client_t *cli, char *cmdstr)
 	if (cp == NULL) {
 		cliprint(cli, "E:command=%s:code=%d", argv[0],
 		    ERR_UNKNOWN_COMMAND);
-	} else {
-		if (setjmp(jmpenv) != 0) {
-			cliprint(cli, "E:command=%s:code=%d", argv[0],
-			    ERR_TIMEOUT);
-			(void)signal(SIGALRM, SIG_IGN);
-			return;
-		}
-		itmval.it_value.tv_sec = dsbcfg_getval(cfg, CFG_CMDMAXWAIT).integer;
-		(void)setitimer(ITIMER_REAL, &itmval, NULL);
-		(void)signal(SIGALRM, catch_cmd_timout);
-		cp->cmdf(cli, argv + 1);
-		/* Stop timer */
-		itmval.it_value.tv_sec  = 0;
-		itmval.it_value.tv_usec = 0;
-		(void)setitimer(ITIMER_REAL, &itmval, NULL);
-		(void)signal(SIGALRM, SIG_IGN);
+		return;
 	}
+	ct = add_cmdthr(cli, cp, argc - 1, (const char **)argv + 1);
+
+	(void)pthread_mutex_lock(&ct->mtx);
+	if (pthread_create(&ct->tid, NULL, cmd_thr, ct) != 0)
+		die("pthread_create()");
+	(void)clock_gettime(CLOCK_REALTIME, &at);
+	at.tv_sec += dsbcfg_getval(cfg, CFG_CMDMAXWAIT).integer;
+
+	ret = pthread_cond_timedwait(&ct->cond, &ct->mtx, &at);
+	(void)pthread_mutex_unlock(&ct->mtx);
+
+	if (ret == ETIMEDOUT) {
+		cliprint(cli, "E:command=%s:code=%d", argv[0], ERR_TIMEOUT);
+		ct->timedout = true;
+		(void)pthread_kill(ct->tid, SIGALRM);
+		return;
+	} else if (ret != 0) {
+		/* This should not happen */
+		die("pthread_cond_timedwait()");
+	}
+}
+
+static void *
+cmd_thr(void *arg)
+{
+	sigset_t    sset;
+	cmdthread_t *cmdthr = (cmdthread_t *)arg;
+
+	sigfillset(&sset);
+	sigdelset(&sset, SIGALRM);
+	(void)pthread_sigmask(SIG_SETMASK, &sset, NULL);
+	(void)signal(SIGALRM, catch_cmd_timeout);
+
+	if (setjmp(cmdthr->jmpenv) != 0) {
+		del_cmdthr(cmdthr);
+		return (NULL);
+	}
+	/* Just for synchronizing with parent */
+	(void)pthread_mutex_lock(&cmdthr->mtx);
+	(void)pthread_mutex_unlock(&cmdthr->mtx);
+
+	cmdthr->cmd->cmdf(cmdthr->cli, cmdthr->argv);
+	(void)pthread_cond_signal(&cmdthr->cond);
+
+	del_cmdthr(cmdthr);
+
+	return (NULL);
 }
 
 static void
