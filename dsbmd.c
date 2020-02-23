@@ -3569,7 +3569,6 @@ del_cmdthr(cmdthread_t *cmdthr)
 	}
 	if (ep == NULL)
 		return;
-	warnx("Removing cmdthr entry ..");
 	pthread_cond_destroy(&ep->cmdthr->cond);
 	pthread_mutex_destroy(&ep->cmdthr->mtx);
 	while (ep->cmdthr->argv != NULL && *ep->cmdthr->argv != NULL)
