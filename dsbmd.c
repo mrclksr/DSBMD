@@ -3585,6 +3585,7 @@ exec_cmd(client_t *cli, char *cmdstr)
 {
 	int    i, ret;
 	char   *argv[12];
+	sdev_t *devp;
 	size_t argc;
 	cmdthread_t	 *ct;
 	struct timespec	 at;
@@ -3617,7 +3618,17 @@ exec_cmd(client_t *cli, char *cmdstr)
 		die("pthread_create()");
 	(void)clock_gettime(CLOCK_REALTIME, &at);
 	at.tv_sec += dsbcfg_getval(cfg, CFG_CMDMAXWAIT).integer;
-
+	/*
+	 * If we are going to execute an external mount command, we need to
+	 * add the value of CFG_PROCMAXWAIT to the timeout value.
+	 */
+	if (strcmp(argv[0], "mount") == 0 && argc >= 2 &&
+	    (devp = lookup_dev(argv[1])) != NULL) {
+		if (devp->fs->mntcmd != NULL || (devp->fs->mntcmd_u != NULL &&
+		    dsbcfg_getval(cfg, CFG_USERMOUNT).boolean &&
+		    usermount_set()))
+			at.tv_sec += dsbcfg_getval(cfg, CFG_PROCMAXWAIT).integer;
+	}
 	ret = pthread_cond_timedwait(&ct->cond, &ct->mtx, &at);
 	(void)pthread_mutex_unlock(&ct->mtx);
 
