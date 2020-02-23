@@ -1618,14 +1618,13 @@ ssystem(uid_t uid, const char *cmd)
 					continue;
 				else if (ret == (pid_t)-1)
 					die("waitpid()");
-				else if (ret == pid) {
-					return (status == 255 ? -1 : \
-					    WEXITSTATUS(status));
-				}
+				else if (ret == pid)
+					return (ERR_TIMEOUT);
 				(void)sleep(1);
 				i++;
 			}
 		}
+		return (ERR_TIMEOUT);
 	}
 	if (errno != 0)
 		return (-1);
@@ -1922,11 +1921,15 @@ exec_mntcmd(client_t *cli, sdev_t *devp, char *mntpath)
 		logprintx("Device %s mounted on %s by UID %d", devp->dev,
 		    devp->mntpt, cli->uid);
 	} else {
-		cliprint(cli, "E:command=mount:code=%d:mntcmderr=%d",
-		    ERR_MNTCMD_FAILED, error);
-		logprint("Command %s executed by UID %d " \
-			 "failed with code %d", mntcmd, cli->uid,
-			 errno != 0 ? errno : error);
+		if (error == ERR_TIMEOUT)
+			cliprint(cli, "E:command=mount:code=%d", error);
+		else {
+			cliprint(cli, "E:command=mount:code=%d:mntcmderr=%d",
+			    ERR_MNTCMD_FAILED, error);
+			logprint("Command %s executed by UID %d " \
+				"failed with code %d", mntcmd, cli->uid,
+				errno != 0 ? errno : error);
+		}
 		rmntpt(mntpath);
 		free(mntpath);
 		(void)change_owner(devp, devp->owner);
