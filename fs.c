@@ -47,6 +47,13 @@
 
 #define DFLTSBSZ		     512    /* Default super block size. */
 
+#define REISERFS_SB_OFFSET	     (1024 * 64)
+#define REISERFS_SB_OLD_OFFSET	     (1024 *  8)
+#define REISERFS_MAGIC_OFFSET	     0x34
+#define REISERFS1_MAGIC		     "ReIsErFs"
+#define REISERFS2_MAGIC		     "ReIsEr2Fs"
+#define REISERFS3_MAGIC		     "ReIsEr3Fs"
+
 #define EXT_SB_PADDING		     1024
 #define EXT_MAGIC_OFFS		     0x0038
 #define EXT_FEATURE_INCOMP_OFFS	     0x0060
@@ -93,21 +100,23 @@ static bool is_iso9660(int);
 static bool is_hfsp(int);
 static bool is_xfs(int);
 static bool is_btrfs(int);
+static bool is_reiserfs(int);
 
 fs_t fstype[] = {
-	{ "ufs",      UFS,     NULL, NULL,    NULL },
-	{ "cd9660",   CD9660,  NULL, NULL,    NULL },
-	{ "msdosfs",  MSDOSFS, NULL, NULL,    NULL },
-	{ "ntfs",     NTFS,    NULL, NULL,    NULL },
-	{ "ext2fs",   EXT,     NULL, NULL,    NULL },
-	{ "ext2fs",   EXT4,    NULL, NULL,    NULL },
-	{ "exfat",    EXFAT,   NULL, NULL,    NULL },
-	{ "fuse",     FUSEFS,  NULL, NULL,    NULL },
-	{ "mtpfs",    MTPFS,   NULL, NULL,    NULL },
-	{ "ptpfs",    PTPFS,   NULL, NULL,    NULL },
-	{ "hfsp",     HFSP,    NULL, NULL,    NULL },
-	{ "xfs",      XFS,     NULL, NULL,    NULL },
-	{ "btrfs",    BTRFS,   NULL, NULL,    NULL }
+	{ "ufs",      UFS,      NULL, NULL,    NULL },
+	{ "cd9660",   CD9660,   NULL, NULL,    NULL },
+	{ "msdosfs",  MSDOSFS,  NULL, NULL,    NULL },
+	{ "ntfs",     NTFS,     NULL, NULL,    NULL },
+	{ "ext2fs",   EXT,      NULL, NULL,    NULL },
+	{ "ext2fs",   EXT4,     NULL, NULL,    NULL },
+	{ "exfat",    EXFAT,    NULL, NULL,    NULL },
+	{ "fuse",     FUSEFS,   NULL, NULL,    NULL },
+	{ "mtpfs",    MTPFS,    NULL, NULL,    NULL },
+	{ "ptpfs",    PTPFS,    NULL, NULL,    NULL },
+	{ "hfsp",     HFSP,     NULL, NULL,    NULL },
+	{ "xfs",      XFS,      NULL, NULL,    NULL },
+	{ "btrfs",    BTRFS,    NULL, NULL,    NULL },
+	{ "reiserfs", REISERFS, NULL, NULL,    NULL }
 };
 
 const int nfstypes = sizeof(fstype) / sizeof(fstype[0]);
@@ -116,16 +125,17 @@ static struct getfs_s {
 	bool (*chkf)(int);
 	FSID type;
 } getfsd[] = {
-	{ is_fat,      MSDOSFS },
-	{ is_ntfs,     NTFS    },
-	{ is_exfat,    EXFAT   },
-	{ is_ufs,      UFS     },
-	{ is_ext4,     EXT4    },
-	{ is_ext,      EXT     },
-	{ is_iso9660,  CD9660  },
-	{ is_hfsp,     HFSP    },
-	{ is_xfs,      XFS     },
-	{ is_btrfs,    BTRFS   }
+	{ is_fat,      MSDOSFS  },
+	{ is_ntfs,     NTFS     },
+	{ is_exfat,    EXFAT    },
+	{ is_ufs,      UFS      },
+	{ is_ext4,     EXT4     },
+	{ is_ext,      EXT      },
+	{ is_iso9660,  CD9660   },
+	{ is_hfsp,     HFSP     },
+	{ is_xfs,      XFS      },
+	{ is_btrfs,    BTRFS    },
+	{ is_reiserfs, REISERFS }
 };
 
 static uint8_t *
@@ -395,6 +405,28 @@ is_btrfs(int dev)
 	if (strncmp((char *)&p[BTRFS_MAGIC_OFFSET], BTRFS_MAGIC,
 	    strlen(BTRFS_MAGIC)) == 0)
 		return (true);
+	return (false);
+}
+
+static bool
+is_reiserfs(int dev)
+{
+	int	    i, j;
+	uint8_t	   *p;
+	const int   offset[] = { REISERFS_SB_OLD_OFFSET, REISERFS_SB_OFFSET };
+	const char *magic[]  = { REISERFS1_MAGIC, REISERFS2_MAGIC,
+				 REISERFS3_MAGIC };
+
+	for (i = 0; i < sizeof(offset) / sizeof(int); i++) {
+		if ((p = bbread(dev, offset[i], DFLTSBSZ)) == NULL)
+			return (false);
+		for (j = 0; j < sizeof(magic) / sizeof(char *); j++) {
+			if (strncmp((char *)&p[REISERFS_MAGIC_OFFSET],
+			    magic[j], strlen(magic[j])) == 0) {
+				return (true);
+			}
+		}
+	}
 	return (false);
 }
 
