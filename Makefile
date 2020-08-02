@@ -22,6 +22,9 @@ PROGRAM_LIBS	     = -lgeom -lcam -lutil -lkiconv -lpthread -lusb
 BSD_INSTALL_DATA    ?= install -m 0644
 BSD_INSTALL_SCRIPT  ?= install -m 555
 BSD_INSTALL_PROGRAM ?= install -s -m 555
+.if defined(DEBUG)
+CFLAGS+= -O0 -g
+.endif
 
 all: ${PROGRAM} ${RCSCRIPT} ${CFGFILE}
 
