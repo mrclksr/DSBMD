@@ -2097,7 +2097,7 @@ getmntpt(sdev_t *devp)
 	struct statfs *mb;
 
 	errno = 0;
-	if ((n = getmntinfo(&mb, MNT_WAIT)) == -1)
+	if ((n = getmntinfo(&mb, MNT_NOWAIT)) == -1)
 		die("getmntinfo()");
 	p = devbasename(devp->dev);
 	for (i = 0; i < n; i++) {
@@ -2164,7 +2164,7 @@ is_mntpt(const char *path)
 	struct statfs *mb;
 
 	errno = 0;
-	if ((n = getmntinfo(&mb, MNT_WAIT)) == -1)
+	if ((n = getmntinfo(&mb, MNT_NOWAIT)) == -1)
 		die("getmntinfo()");
 	for (i = 0; i < n && path != NULL; i++) {
 		if (strcmp(path, mb[i].f_mntonname) == 0)
@@ -3844,18 +3844,18 @@ poll_mntbl()
 
 	if (bufsz == 0) {
 		/* Init */
-		while ((n = getfsstat(NULL, 0, MNT_WAIT)) == -1)
+		while ((n = getfsstat(NULL, 0, MNT_NOWAIT)) == -1)
 			(void)usleep(500000);
 		bufsz = (n + 8) * sizeof(struct statfs);
 		if ((buf = malloc(bufsz)) == NULL)
 			die("malloc()");
 	}
-	if ((n = getfsstat(buf, bufsz, MNT_WAIT)) != -1) {
+	if ((n = getfsstat(buf, bufsz, MNT_NOWAIT)) != -1) {
 		while (n > 0 && n * sizeof(struct statfs) >= bufsz) {
 			bufsz += 8 * sizeof(struct statfs);
 			if ((buf = realloc(buf, bufsz)) == NULL)
 				die("realloc()");
-			if ((n = getfsstat(buf, bufsz, MNT_WAIT)) == -1)
+			if ((n = getfsstat(buf, bufsz, MNT_NOWAIT)) == -1)
 				logprint("getfsstat()");
 		}
 	} else
