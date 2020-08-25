@@ -11,7 +11,8 @@ CFGDIR	       	     = ${PREFIX}/etc
 DOCSDIR		    ?= ${PREFIX}/share/doc/${PROGRAM}
 DOCS		     = readme.mdoc
 SOURCES		     = ${PROGRAM}.c config.c dsbcfg/dsbcfg.c fs.c common.c
-FREEBSD_VERSION	     = `freebsd-version -u | cut -d- -f 1 | tr -d .`
+FREEBSD_VERSION	     = `freebsd-version -u | (LC_ALL=C awk -F '-' \
+		       '{ print int($$1 * 10) }')`
 PROGRAM_FLAGS	     = -Wall ${CFLAGS} ${CPPFLAGS} -DPROGRAM=\"${PROGRAM}\"
 PROGRAM_FLAGS	    += -DPATH_DSBMD_LOG=\"${LOGFILE}\"
 PROGRAM_FLAGS	    += -DPATH_PID_FILE=\"${PIDFILE}\"
