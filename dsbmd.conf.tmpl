@@ -125,7 +125,6 @@ exfat_mount_cmd = "/usr/local/sbin/mount.exfat -o \"uid=${DSBMD_UID},gid=${DSBMD
 hfsp_mount_cmd = "/usr/local/bin/hfsfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 xfs_mount_cmd = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},type=xfs\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 btrfs_mount_cmd = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},type=btrfs\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
-reiserfs_mount_cmd = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},type=reiserfs\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 
 # Commands for user mode mounting.
 ntfs_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" ntfs-3g ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
@@ -136,7 +135,6 @@ ext4_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" fuse-ext2 -o 'r
 hfsp_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" hfsfuse ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 xfs_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o type=xfs ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 btrfs_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o type=btrfs ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
-reiserfs_mount_cmd_usr = "/sbin/mount_fusefs auto \"${DSBMD_MNTPT}\" lklfuse -o type=reiserfs ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 
 # allow_users - Comma separated list of users who are allowed to connect.
 # allow_users = jondoe, janedoe

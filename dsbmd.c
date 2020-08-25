@@ -427,9 +427,6 @@ main(int argc, char *argv[])
 		case BTRFS:
 			INITFS(i, BTRFS);
 			break;
-		case REISERFS:
-			INITFS(i, REISERFS);
-			break;
 		default:
 			/* Just to soothe clang. */
 			break;
