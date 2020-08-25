@@ -2039,14 +2039,15 @@ mkmntpt(const sdev_t *devp)
 		die("malloc()");
 	(void)sprintf(mntpath, "%s/%s", mntdir, p);
 
-	if (stat(mntpath, &sb) == -1 && errno != ENOENT)
+	if (stat(mntpath, &sb) == -1 && (errno != ENOENT && errno != EIO))
 		die("stat(%s)", mntpath);
 	else if (errno == ENOENT) {
 		if (mkdir(mntpath, MNTPTMODE) == -1)
 			die("mkdir(%s)", mntpath);
 	} else {
 		/* 
-		 * File exists.  If  the  file  isn't  a  directory, or a
+		 * File exists, or we can't access the mount point due to an
+		 * I/O error.  If  the  file  isn't  a  directory, or a
 		 * directory  which  is  not  empty,  or  if there is any
 		 * other reason why we can't delete the directory, try to
 		 * create an alternative mount point.
