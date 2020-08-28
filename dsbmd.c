@@ -3729,7 +3729,9 @@ cmd_size(client_t *cli, char **argv)
 				return;
 			}
 		} while (n++ < 3 && s.f_blocks <= 1);
-
+		/* When mounting MTP devices via FUSE, the block size is 0 */
+		if (s.f_bsize == 0)
+			s.f_bsize = 512;
 		cliprint(cli,
 		    "O:command=size:dev=%s:mediasize=%llu:free=%llu:used=%llu",
 		    devp->dev,
