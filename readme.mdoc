@@ -133,6 +133,18 @@ dsbmc-cli -a&
 .Ed
 .Pp
 to your shell's rc file, or to your window manager's autostart file.
+.Ss Disable GEOM withering
+.Nm
+operates on device nodes like da*, ada*, etc. If GEOM withering is enabled,
+and a device is mounted by its disk ID, all device nodes of that disk
+disappear in favour of its disk IDs under /dev/diskid. To disable this
+behavior, set
+.Bd -literal -offset indent
+kern.geom.label.disk_ident.enable="0"
+.Ed
+.Pp
+in
+.Em /boot/loader.conf .
 .Sh FILES USED
 .Bl -tag
 .It Em /var/run/dsbmd.socket
