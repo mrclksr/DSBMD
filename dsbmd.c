@@ -3562,6 +3562,7 @@ add_cmdthr(client_t *cli, struct command_s *cmd, size_t argc, const char **argv)
 static void
 del_cmdthr(cmdthread_t *cmdthr)
 {
+	char **argv;
 	struct thrlist_s *ep;
 
 	SLIST_FOREACH(ep, &cmdthreads, next) {
@@ -3572,8 +3573,9 @@ del_cmdthr(cmdthread_t *cmdthr)
 		return;
 	pthread_cond_destroy(&ep->cmdthr->cond);
 	pthread_mutex_destroy(&ep->cmdthr->mtx);
-	while (ep->cmdthr->argv != NULL && *ep->cmdthr->argv != NULL)
-		free(*ep->cmdthr->argv++);
+	argv = ep->cmdthr->argv;
+	while (argv != NULL && *argv != NULL)
+		free(*argv++);
 	if (ep->cmdthr->argv != NULL)
 		free(ep->cmdthr->argv);
 	free(ep->cmdthr);
@@ -3636,11 +3638,13 @@ exec_cmd(client_t *cli, char *cmdstr)
 		cliprint(cli, "E:command=%s:code=%d", argv[0], ERR_TIMEOUT);
 		ct->timedout = true;
 		(void)pthread_kill(ct->tid, SIGALRM);
+		del_cmdthr(ct);
 		return;
 	} else if (ret != 0) {
 		/* This should not happen */
 		die("pthread_cond_timedwait()");
 	}
+	del_cmdthr(ct);
 }
 
 static void *
@@ -3654,18 +3658,14 @@ cmd_thr(void *arg)
 	(void)pthread_sigmask(SIG_SETMASK, &sset, NULL);
 	(void)signal(SIGALRM, catch_cmd_timeout);
 
-	if (setjmp(cmdthr->jmpenv) != 0) {
-		del_cmdthr(cmdthr);
+	if (setjmp(cmdthr->jmpenv) != 0)
 		return (NULL);
-	}
 	/* Just for synchronizing with parent */
 	(void)pthread_mutex_lock(&cmdthr->mtx);
 	(void)pthread_mutex_unlock(&cmdthr->mtx);
 
 	cmdthr->cmd->cmdf(cmdthr->cli, cmdthr->argv);
 	(void)pthread_cond_signal(&cmdthr->cond);
-
-	del_cmdthr(cmdthr);
 
 	return (NULL);
 }
