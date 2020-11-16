@@ -140,6 +140,19 @@ manually as regular user, or add the command
 
 to your shell's rc file, or to your window manager's autostart file.
 
+## Disable GEOM withering
+
+**DSBMD**
+operates on device nodes like da\*, ada\*, etc. If GEOM withering is enabled,
+and a device is mounted by its disk ID, all device nodes of that disk
+disappear in favour of its disk IDs under /dev/diskid. To disable this
+behavior, set
+
+	kern.geom.label.disk_ident.enable="0"
+
+in
+*/boot/loader.conf*.
+
 # FILES USED
 
 */var/run/dsbmd.socket*
@@ -369,4 +382,4 @@ and
 'used'
 are 0.
 
- \- December 25, 2019
+ \- September 18, 2020
