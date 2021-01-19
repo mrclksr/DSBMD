@@ -43,6 +43,7 @@
 #include <libusb20.h>
 #include <libutil.h>
 #include <limits.h>
+#include <locale.h>
 #include <login_cap.h>
 #include <paths.h>
 #include <pthread.h>
@@ -1634,8 +1635,10 @@ ssystem(uid_t uid, const char *cmd)
 static int
 set_msdosfs_locale(const char *locale, struct iovec **iov, size_t *iovlen)
 {
+	char *prev_locale;
 	const char *cs;
 
+	prev_locale = setlocale(LC_CTYPE, NULL);
 	if (modfind("msdosfs_iconv") == -1) {
 		if (errno != ENOENT) {
 			logprint("modfind(msdosfs_iconv) failed.");
@@ -1650,17 +1653,25 @@ set_msdosfs_locale(const char *locale, struct iovec **iov, size_t *iovlen)
 		logprintx("Invalid locale string '%s'", locale);
 		return (-1);
 	}
+	if (setlocale(LC_CTYPE, locale) == NULL)
+		die("setlocale(%s)", locale);
 	locale = kiconv_quirkcs(cs + 1, KICONV_VENDOR_MICSFT);
+	if (kiconv_add_xlat16_cspairs(ENCODING_UNICODE, locale) != 0 &&
+	    errno != EEXIST)
+		die("kiconv_add_xlat16_cspairs(ENCODING_UNICODE)");
 	if (kiconv_add_xlat16_cspair(locale, locale,
 	    KICONV_FROM_UPPER | KICONV_LOWER) != 0) {
 		logprint("kiconv_add_xlat16_cspair()");
+		if (prev_locale != NULL)
+			setlocale(LC_CTYPE, prev_locale);
 		return (-1);
 	}
 	extend_iovec(iov, iovlen, "cs_win", ENCODING_UNICODE);
 	extend_iovec(iov, iovlen, "cs_local", locale);
 	extend_iovec(iov, iovlen, "cs_dos", locale);
 	extend_iovec(iov, iovlen, "kiconv", "");
-
+	if (prev_locale != NULL)
+		setlocale(LC_CTYPE, prev_locale);
 	return (0);
 }
 
