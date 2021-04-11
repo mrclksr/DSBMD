@@ -442,8 +442,8 @@ main(int argc, char *argv[])
 		if (daemon(0, 1) == -1)
 			err(EXIT_FAILURE, "Failed to daemonize");
 		lockpidfile();
-		/* Close all files except for the lock file. */
-		for (i = 0; i < 16; i++) {
+		/* Close stdin, stdout, and stderr. */
+		for (i = 0; i < 3; i++) {
 			if (pidfile_fileno(pfh) != i)
 				(void)close(i);
 		}
