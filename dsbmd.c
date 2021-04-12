@@ -439,14 +439,9 @@ main(int argc, char *argv[])
 
 	/* Ready to deamonize. */
 	if (!fflag) {
-		if (daemon(0, 1) == -1)
+		if (daemon(0, 0) == -1)
 			err(EXIT_FAILURE, "Failed to daemonize");
 		lockpidfile();
-		/* Close stdin, stdout, and stderr. */
-		for (i = 0; i < 3; i++) {
-			if (pidfile_fileno(pfh) != i)
-				(void)close(i);
-		}
 		/* Redirect error messages, stdout and stderr to logfile. */
 		if ((fp = fopen(PATH_DSBMD_LOG, "a+")) == NULL)
 			err(EXIT_FAILURE, "fopen()");
