@@ -2464,6 +2464,7 @@ get_da_storage_type(const char *devname)
 		logprint("sysctlbyname(%s)", var);
 		return (-1);
 	}
+	buf[sz] = '\0';
 	for (p = buf; (p = strtok(p, "\t ")) != NULL; p = NULL) {
 		if (strncmp(p, "ugen=", 5) == 0)
 			break;
