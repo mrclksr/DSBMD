@@ -439,14 +439,9 @@ main(int argc, char *argv[])
 
 	/* Ready to deamonize. */
 	if (!fflag) {
-		if (daemon(0, 1) == -1)
+		if (daemon(0, 0) == -1)
 			err(EXIT_FAILURE, "Failed to daemonize");
 		lockpidfile();
-		/* Close all files except for the lock file. */
-		for (i = 0; i < 16; i++) {
-			if (pidfile_fileno(pfh) != i)
-				(void)close(i);
-		}
 		/* Redirect error messages, stdout and stderr to logfile. */
 		if ((fp = fopen(PATH_DSBMD_LOG, "a+")) == NULL)
 			err(EXIT_FAILURE, "fopen()");
@@ -2469,6 +2464,7 @@ get_da_storage_type(const char *devname)
 		logprint("sysctlbyname(%s)", var);
 		return (-1);
 	}
+	buf[sz] = '\0';
 	for (p = buf; (p = strtok(p, "\t ")) != NULL; p = NULL) {
 		if (strncmp(p, "ugen=", 5) == 0)
 			break;
