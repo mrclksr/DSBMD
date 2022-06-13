@@ -1899,6 +1899,7 @@ exec_mntcmd(client_t *cli, sdev_t *devp, char *mntpath)
 	(void)setenv(ENV_LABEL, devp->name, 1);
 	(void)setenv(ENV_FILESYSTEM, devp->fs->name, 1);
 	(void)setenv(ENV_MNTPT, mntpath, 1);
+	logprintx("Running %s", mntcmd);
 	if (devp->iface->type == IF_TYPE_UGEN) {
 		(void)setenv(ENV_USB_PORT,
 		    ugen_to_gphoto_port(devbasename(devp->dev)), 1);
@@ -2917,6 +2918,7 @@ get_ugen_type(const char *ugen)
 				    USB_PROTOCOL_PTP) {
 					type = ST_PTP;
 					found = true;
+					logprintx("%s: TYPE PTP", ugen);
 				} else if (libusb20_dev_req_string_simple_sync(
 				    pdev, idesc->iInterface, buf,
 				    sizeof(buf)) != 0)
@@ -2924,6 +2926,7 @@ get_ugen_type(const char *ugen)
 				else if (strcmp(buf, "MTP") == 0) {
 					found = true;
 					type = ST_MTP;
+					logprintx("%s: TYPE MTP", ugen);
 				}
 			}
 			free(cfg);
