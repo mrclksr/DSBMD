@@ -119,7 +119,7 @@ ext_opts = "rw,noatime"
 # btrfs_mount_cmd_usr =
 
 ntfs_mount_cmd = "/usr/local/bin/ntfs-3g -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
-mtpfs_mount_cmd = "/usr/local/bin/jmtpfs ${DSBMD_MNTPT} -device=${DSBMD_USB_UNIT},${DSBMD_USB_ADDR} -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},allow_other\""
+mtpfs_mount_cmd = "/usr/local/bin/jmtpfs \"${DSBMD_MNTPT}\" -device=${DSBMD_USB_UNIT},${DSBMD_USB_ADDR} -o \"uid=${DSBMD_UID},gid=${DSBMD_GID},allow_other\""
 ptpfs_mount_cmd = "/usr/local/bin/gphotofs --port=${DSBMD_GPHOTO_USB_PORT} -o allow_other \"${DSBMD_MNTPT}\""
 exfat_mount_cmd = "/usr/local/sbin/mount.exfat -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
 hfsp_mount_cmd = "/usr/local/bin/hfsfuse -o \"uid=${DSBMD_UID},gid=${DSBMD_GID}\" ${DSBMD_DEVICE} \"${DSBMD_MNTPT}\""
