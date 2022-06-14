@@ -2891,7 +2891,7 @@ get_ugen_type(const char *ugen)
 		if (libusb20_dev_open(pdev, 0))
 			die("libusb20_dev_open()");
 		ddesc = libusb20_dev_get_device_desc(pdev);
-		for (i = 0; i !=  ddesc->bNumConfigurations && !found; i++) {
+		for (i = 0; i != ddesc->bNumConfigurations && !found; i++) {
 			cfg = libusb20_dev_alloc_config(pdev, i);
 			if (cfg == NULL)
 				continue;
@@ -2909,7 +2909,17 @@ get_ugen_type(const char *ugen)
 						found = true;
 						break;
 					}
-				} else if (idesc->bInterfaceClass ==
+				}
+				if (libusb20_dev_req_string_simple_sync(
+				    pdev, idesc->iInterface, buf,
+				    sizeof(buf)) == 0) {
+					if (strcmp(buf, "MTP") == 0) {
+						found = true;
+						type = ST_MTP;
+						break;
+					}
+				}
+				if (idesc->bInterfaceClass ==
 				    USB_CLASS_PTP &&
 					idesc->bInterfaceSubClass ==
 				    USB_SUBCLASS_PTP &&
@@ -2917,13 +2927,6 @@ get_ugen_type(const char *ugen)
 				    USB_PROTOCOL_PTP) {
 					type = ST_PTP;
 					found = true;
-				} else if (libusb20_dev_req_string_simple_sync(
-				    pdev, idesc->iInterface, buf,
-				    sizeof(buf)) != 0)
-					continue;
-				else if (strcmp(buf, "MTP") == 0) {
-					found = true;
-					type = ST_MTP;
 				}
 			}
 			free(cfg);
