@@ -91,7 +91,7 @@ typedef enum IF_TYPES {
 	IF_TYPE_MMC,	IF_TYPE_FUSE,
 	IF_TYPE_MD,	IF_TYPE_LVM,
 	IF_TYPE_MTP,	IF_TYPE_PTP,
-	IF_TYPE_NVD
+	IF_TYPE_NVD,	IF_TYPE_NDA
 } ift_t;
 
 typedef struct iface_s {
@@ -104,6 +104,7 @@ typedef struct iface_s {
 #define RE_MD	"^md[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?(\\.eli)?(\\.uzip)?$"
 #define RE_LVM	"^linux_lvm/[a-zA-Z0-9]+"
 #define RE_NVD	"^nvd[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?(\\.eli)?$"
+#define RE_NDA	"^nda[0-9]{1}((s[1-9]{1}[a-h]?)|(p[1-9]{1}))?(\\.eli)?$"
 #define RE_FUSE NULL
 #define RE_MTP  NULL
 #define RE_PTP  NULL
